@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>um982_rtk</name>
+  <version>0.1.0</version>
+  <description>UM982 dual-antenna RTK positioning and navigation foundation.</description>
+
+  <maintainer email="sigu@todo.todo">sigu</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>rospy</depend>
+  <depend>rtk_interfaces</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf</depend>
+
+  <exec_depend>python3-serial</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <export />
+</package>

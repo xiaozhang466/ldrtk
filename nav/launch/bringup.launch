@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="rosbridge_port" default="9090" />
+  <arg name="start_rosbridge" default="false" />
+  <arg name="rtk_config" default="$(find um982_rtk)/config/rtk.yaml" />
+  <arg name="nav_config" default="$(find um982_rtk)/config/navigation.yaml" />
+  <arg name="launch_navigation" default="true" />
+  <arg name="launch_chassis" default="true" />
+  <arg name="chassis_port" default="can0" />
+  <arg name="chassis_model" default="ranger_mini_v2" />
+  <arg name="chassis_odom_frame" default="odom" />
+  <arg name="chassis_base_frame" default="base_link" />
+  <arg name="chassis_odom_topic" default="odom" />
+  <arg name="chassis_publish_odom_tf" default="false" />
+
+  <include file="$(find um982_rtk)/launch/um982_rtk.launch">
+    <arg name="config" value="$(arg rtk_config)" />
+    <arg name="nav_config" value="$(arg nav_config)" />
+    <arg name="launch_navigation" value="$(arg launch_navigation)" />
+  </include>
+
+  <include if="$(arg launch_chassis)" file="$(find ranger_base)/launch/include/ranger_robot_base.launch">
+    <arg name="port_name" value="$(arg chassis_port)" />
+    <arg name="robot_model" value="$(arg chassis_model)" />
+    <arg name="odom_frame" value="$(arg chassis_odom_frame)" />
+    <arg name="base_frame" value="$(arg chassis_base_frame)" />
+    <arg name="odom_topic_name" value="$(arg chassis_odom_topic)" />
+    <arg name="publish_odom_tf" value="$(arg chassis_publish_odom_tf)" />
+  </include>
+
+  <include if="$(arg start_rosbridge)" file="/home/ros/ZMG/sigu/rtk/nav/launch/rosbridge.launch">
+    <arg name="port" value="$(arg rosbridge_port)" />
+  </include>
+</launch>

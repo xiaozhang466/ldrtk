@@ -1,0 +1,66 @@
+# UM982 RTK receiver configuration.
+
+serial_device: "/dev/ttyrtk"
+baud: 115200
+frame_id: "gps_link"
+odom_frame_id: "map"
+base_frame_id: "base_link"
+
+# The current production path uses the orchard base station through the
+# existing MCU/receiver wiring. NTRIP is not part of this first node.
+correction_source: "orchard_mcu"
+
+antenna:
+  mode: "dual"
+  # Antenna positions are measured in base_link coordinates:
+  # x = forward, y = left, z = up, in meters.
+  #
+  # Defaults below are initial measured geometry placeholders:
+  # 0.38 m lateral baseline, antenna center about 0.182 m ahead of base_link.
+  # Measure the real vehicle and update these before navigation tuning.
+  primary:
+    x: 0.182
+    y: 0.190
+    z: 0.0
+  secondary:
+    x: 0.182
+    y: -0.190
+    z: 0.0
+  apply_position_offset: true
+  # Expected physical baseline range. Messages outside this range are ignored
+  # when heading is computed from dual antenna positions.
+  min_baseline_m: 0.05
+  max_baseline_m: 10.0
+  # Vehicle yaw = ANT1->ANT2 bearing + heading_offset_deg.
+  # Current antenna layout starts with -90 deg and should be verified on vehicle.
+  heading_offset_deg: -90.0
+  heading_covariance_deg: 1.0
+
+position:
+  # absolute_utm matches GPS paths saved by the existing frontend/backend:
+  #   odom.x = UTM easting, odom.y = UTM northing
+  # local_origin is useful for isolated tests:
+  #   odom.x/y = current UTM - origin UTM
+  coordinate_mode: "absolute_utm"
+  # Only used when coordinate_mode is local_origin. If true, the first fixed
+  # RTK solution becomes local origin for odometry.
+  auto_origin: true
+  origin_lat: 0.0
+  origin_lon: 0.0
+  origin_alt: 0.0
+  fixed_only_for_origin: true
+
+output:
+  status_interval: 5.0
+  read_timeout: 0.2
+  reconnect_delay: 1.0
+  rtkstatus_query_interval: 1.0
+  bad_sentence_warn_interval: 10.0
+  publish_compat_aliases: true
+
+# Commands sent once after the serial port opens. Keep this conservative:
+# RTKSTATUSA makes receiver status observable; MSPOSA enables dual-antenna
+# position output on UM982-family receivers when supported.
+startup_commands:
+  - "RTKSTATUSA"
+  - "MSPOSA 0.1"

@@ -1,0 +1,24 @@
+<launch>
+  <arg name="config" default="$(find um982_rtk)/config/rtk.yaml" />
+  <arg name="nav_config" default="$(find um982_rtk)/config/navigation.yaml" />
+  <arg name="launch_navigation" default="true" />
+
+  <node pkg="um982_rtk"
+        type="um982_rtk_node.py"
+        name="um982_rtk_node"
+        output="screen"
+        respawn="true"
+        respawn_delay="1.0">
+    <param name="config" value="$(arg config)" />
+  </node>
+
+  <node if="$(arg launch_navigation)"
+        pkg="um982_rtk"
+        type="um982_rtk_nav_node.py"
+        name="um982_rtk_nav_node"
+        output="screen"
+        respawn="true"
+        respawn_delay="1.0">
+    <param name="config" value="$(arg nav_config)" />
+  </node>
+</launch>
