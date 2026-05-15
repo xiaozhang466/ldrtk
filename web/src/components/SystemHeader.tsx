@@ -69,23 +69,29 @@ const SystemHeader: React.FC<SystemHeaderProps> = ({
     }
 
     // 延迟执行订阅，确保 ROS 状态已更新
+    const unsubs: Array<(() => void) | null> = []
     const timer = setTimeout(() => {
       if (!rosConnected) return
+
+      const updateBatteryLevel = (msg: any) => {
+        const value = msg?.SOC ?? msg?.percentage ?? msg?.data
+        const numericValue = Number(value)
+        if (Number.isFinite(numericValue)) {
+          setBatteryLevel(Math.round(numericValue))
+        }
+      }
       
       // 订阅电量话题
       try {
-        rosInstance.subscribe('/battery_status', (msg: any) => {
-          if (msg?.data != null) {
-            setBatteryLevel(Math.round(msg.data))
-          }
-        }, 'std_msgs/Float32')
+        unsubs.push(rosInstance.subscribe('/battery_state', updateBatteryLevel, 'ranger_msgs/RangerBmsStatus'))
+        unsubs.push(rosInstance.subscribe('/battery_status', updateBatteryLevel, 'std_msgs/Float32'))
       } catch (error) {
         console.error('[SystemHeader] Battery subscription error:', error)
       }
 
       // 订阅 GPS 话题获取定位状态
       try {
-        rosInstance.subscribe('/gps/fix', (msg: any) => {
+        unsubs.push(rosInstance.subscribe('/gps/fix', (msg: any) => {
           if (msg?.status?.status === 2) {
             setGpsSignal('excellent')
           } else if (msg?.status?.status === 1) {
@@ -95,18 +101,18 @@ const SystemHeader: React.FC<SystemHeaderProps> = ({
           } else {
             setGpsSignal('none')
           }
-        }, 'sensor_msgs/NavSatFix')
+        }, 'sensor_msgs/NavSatFix'))
       } catch (error) {
         console.error('[SystemHeader] GPS fix subscription error:', error)
       }
 
       // 订阅星数话题
       try {
-        rosInstance.subscribe('/gps/satellites', (msg: any) => {
+        unsubs.push(rosInstance.subscribe('/gps/satellites', (msg: any) => {
           if (msg?.data != null) {
             setStarCount(msg.data)
           }
-        }, 'std_msgs/UInt16')
+        }, 'std_msgs/UInt16'))
       } catch (error) {
         console.error('[SystemHeader] Satellites subscription error:', error)
       }
@@ -114,6 +120,9 @@ const SystemHeader: React.FC<SystemHeaderProps> = ({
 
     return () => {
       clearTimeout(timer)
+      unsubs.forEach((unsub) => {
+        if (unsub) unsub()
+      })
       console.log('[SystemHeader] Timer cleared')
     }
   }, [rosConnected])

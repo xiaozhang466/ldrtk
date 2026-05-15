@@ -20,10 +20,24 @@ const Home = () => {
 
   // 订阅电池状态
   useEffect(() => {
-    const unsub = ros.subscribe('/battery_status', (msg) => {
-      setBattery(Math.round(msg.data))
-    }, 'std_msgs/Float32')
-    return () => { if (unsub) unsub() }
+    const updateBattery = (msg) => {
+      const value = msg?.SOC ?? msg?.percentage ?? msg?.data
+      const numericValue = Number(value)
+      if (Number.isFinite(numericValue)) {
+        setBattery(Math.round(numericValue))
+      }
+    }
+
+    const unsubs = [
+      ros.subscribe('/battery_state', updateBattery, 'ranger_msgs/RangerBmsStatus'),
+      ros.subscribe('/battery_status', updateBattery, 'std_msgs/Float32'),
+    ]
+
+    return () => {
+      unsubs.forEach((unsub) => {
+        if (unsub) unsub()
+      })
+    }
   }, [ros])
 
   // 订阅 GPS 状态
