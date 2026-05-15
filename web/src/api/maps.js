@@ -99,20 +99,6 @@ export async function createFusionMap(mapData) {
   return response.json();
 }
 
-/**
- * 获取 RTK 原点 (当前固定解)
- * 
- * @returns {Promise<Object>} RTK 原点坐标
- */
-export async function getRtkOrigin() {
-  const response = await fetch('/api/rtk/origin');
-  
-  if (!response.ok) {
-    throw new Error('Failed to get RTK origin');
-  }
-  
-  return response.json();
-}
 
 /**
  * 删除地图

@@ -3,12 +3,13 @@ import json
 import bcrypt
 from datetime import datetime
 from pathlib import Path
+from config.config import Config
 
 class UserModel:
     """用户模型 - 本地文件存储"""
     
-    def __init__(self, config_path: str = '/home/ros/ZMG/sigu/rtk/data/config'):
-        self.config_path = Path(config_path)
+    def __init__(self, config_path: str = None):
+        self.config_path = Path(config_path or Config.CONFIG_PATH)
         self.users_file = self.config_path / 'users.json'
         self._ensure_config_dir()
         self._ensure_default_user()

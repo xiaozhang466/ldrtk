@@ -28,7 +28,7 @@
     <arg name="publish_odom_tf" value="$(arg chassis_publish_odom_tf)" />
   </include>
 
-  <include if="$(arg start_rosbridge)" file="/home/ros/ZMG/sigu/rtk/nav/launch/rosbridge.launch">
+  <include if="$(arg start_rosbridge)" file="$(dirname)/rosbridge.launch">
     <arg name="port" value="$(arg rosbridge_port)" />
   </include>
 </launch>

@@ -6,8 +6,9 @@ source "$SCRIPT_DIR/env.sh"
 
 PID_FILE="$RTK_LOG_DIR/rtk_navigation.pid"
 LOG_FILE="$RTK_LOG_DIR/rtk_navigation.log"
+BRINGUP_LAUNCH="$RTK_NAV_WS/launch/bringup.launch"
 
-if pgrep -f "/home/ros/ZMG/sigu/rtk/nav/launch/bringup.launch" >/dev/null 2>&1; then
+if pgrep -f "$BRINGUP_LAUNCH" >/dev/null 2>&1; then
   echo "RTK navigation is already running."
   exit 0
 fi
@@ -25,7 +26,7 @@ else
   echo "WARN: install ros-noetic-rosbridge-server to enable ws://<host>:9090."
 fi
 
-nohup roslaunch "$RTK_NAV_WS/launch/bringup.launch" "$ROSBRIDGE_ARG" "$@" > "$LOG_FILE" 2>&1 &
+nohup roslaunch "$BRINGUP_LAUNCH" "$ROSBRIDGE_ARG" "$@" > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 
 sleep 3

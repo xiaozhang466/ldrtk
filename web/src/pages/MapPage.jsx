@@ -100,7 +100,7 @@ const MapPage = () => {
         <Card title="📊 当前地图信息" titleStyle={{color:'#fff'}} style={{borderRadius:'16px',border:'none'}}>
           <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'24px',marginBottom:'24px'}}>
             <div><div style={{color:'#999',marginBottom:'8px'}}>地图名称</div><div style={{fontSize:'18px',fontWeight:'bold'}}>{currentMap.name}</div></div>
-            <div><div style={{color:'#999',marginBottom:'8px'}}>/home/ros/ZMG/sigu/rtk/data/maps/{currentMap.name}/</div></div>
+            <div><div style={{color:'#999',marginBottom:'8px'}}>存储目录</div><div style={{fontSize:'14px',wordBreak:'break-all'}}>data/maps/{currentMap.name}/</div></div>
             <div><div style={{color:'#999',marginBottom:'8px'}}>PCD 点云地图</div></div>
             <div><div style={{color:'#999',marginBottom:'8px'}}>UTM 坐标系</div></div>
           </div>

@@ -5,10 +5,11 @@ import json
 from datetime import datetime
 import yaml
 from math import radians, degrees, sin, cos, sqrt, atan2, tan, pi
+from config.config import Config
 
 path_bp = Blueprint('path', __name__, url_prefix='/api/path')
 
-MAP_BASE_PATH = Path('/home/ros/ZMG/sigu/rtk/data/maps')
+MAP_BASE_PATH = Path(Config.MAP_BASE_PATH)
 
 
 def wgs84_to_utm(lat: float, lng: float) -> tuple:

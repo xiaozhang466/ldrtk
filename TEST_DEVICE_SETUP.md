@@ -4,22 +4,16 @@
 
 如果只是验证 RTK 固定解、航向、底盘响应，可以先不配置前后端，直接运行 ROS 车端。
 
-## 1. 推荐目录
+## 1. 项目根目录
 
-建议项目放在固定路径：
-
-```bash
-/home/ros/ZMG/sigu/rtk
-```
-
-原因是部分脚本和后端静态地图路径目前使用了该路径，例如：
+项目可以放在任意目录。建议先进入项目根目录，并在当前终端设置 `RTK_ROOT`：
 
 ```bash
-nav/scripts/env.sh
-backend/app.py
+cd /path/to/rtk
+export RTK_ROOT="$(pwd)"
 ```
 
-如果测试设备上的路径不同，需要同步修改这些文件里的项目根路径。
+如果没有手动设置 `RTK_ROOT`，脚本和后端会尽量根据自身文件位置自动推导项目根目录。
 
 ## 2. 必要系统包
 
@@ -56,7 +50,7 @@ npm -v
 编译 ROS 工作空间：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk/nav
+cd "$RTK_ROOT/nav"
 catkin_make
 source devel/setup.bash
 ```
@@ -64,7 +58,7 @@ source devel/setup.bash
 启动车端，默认会启动 RTK、导航、Ranger Mini v2 底盘驱动，并自动尝试启动 rosbridge：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk
+cd "$RTK_ROOT"
 ./nav/scripts/start.sh
 ```
 
@@ -92,14 +86,14 @@ rostopic echo /cmd_vel
 安装依赖：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk/backend
+cd "$RTK_ROOT/backend"
 ./install_deps.sh
 ```
 
 启动后端：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk
+cd "$RTK_ROOT"
 ./backend/start.sh
 ```
 
@@ -123,14 +117,14 @@ export TIANDITU_API_TOKEN="sigu_tdt_2026_secure_token"
 安装依赖：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk/tianditu-proxy
+cd "$RTK_ROOT/tianditu-proxy"
 ./install_deps.sh
 ```
 
 启动代理：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk
+cd "$RTK_ROOT"
 ./tianditu-proxy/start.sh
 ```
 
@@ -147,14 +141,14 @@ curl http://localhost:5001/api/tianditu/health
 安装依赖：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk/web
+cd "$RTK_ROOT/web"
 npm install
 ```
 
 启动前端：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk/web
+cd "$RTK_ROOT/web"
 npm run dev -- --host 0.0.0.0
 ```
 
@@ -177,7 +171,7 @@ http://<测试设备IP>:5173
 
 ```bash
 # 1. 车端 ROS
-cd /home/ros/ZMG/sigu/rtk
+cd "$RTK_ROOT"
 ./nav/scripts/start.sh
 
 # 2. 后端
@@ -196,13 +190,13 @@ npm run dev -- --host 0.0.0.0
 如果现场网络不好，建议提前在有网环境执行：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk/backend
+cd "$RTK_ROOT/backend"
 ./install_deps.sh
 
-cd /home/ros/ZMG/sigu/rtk/tianditu-proxy
+cd "$RTK_ROOT/tianditu-proxy"
 ./install_deps.sh
 
-cd /home/ros/ZMG/sigu/rtk/web
+cd "$RTK_ROOT/web"
 npm install
 ```
 

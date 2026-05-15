@@ -1,7 +1,9 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.navigation_state import NavigationStateManager, NavigationStatus
+from config.config import Config
 from datetime import datetime
+from pathlib import Path
 import subprocess
 import os
 import signal
@@ -12,8 +14,9 @@ navigation_bp = Blueprint('navigation', __name__, url_prefix='/api/navigation')
 state_manager = NavigationStateManager()
 
 # 服务脚本路径
-NAVIGATION_SCRIPT = '/home/ros/ZMG/sigu/rtk/nav/scripts/start.sh'
-STOP_NAVIGATION_SCRIPT = '/home/ros/ZMG/sigu/rtk/nav/scripts/stop.sh'
+PROJECT_ROOT = Path(Config.PROJECT_ROOT)
+NAVIGATION_SCRIPT = PROJECT_ROOT / 'nav' / 'scripts' / 'start.sh'
+STOP_NAVIGATION_SCRIPT = PROJECT_ROOT / 'nav' / 'scripts' / 'stop.sh'
 
 
 @navigation_bp.route('/status', methods=['GET'])
@@ -67,7 +70,7 @@ def start_navigation():
             }), 409
 
         # 检查脚本是否存在
-        if not os.path.exists(NAVIGATION_SCRIPT):
+        if not NAVIGATION_SCRIPT.exists():
             return jsonify({
                 'success': False,
                 'error': f'导航脚本不存在：{NAVIGATION_SCRIPT}'
@@ -80,11 +83,11 @@ def start_navigation():
                 f.write(f'开始导航：{map_name}\n时间：{os.popen("date").read()}\n')
 
             process = subprocess.Popen(
-                ['bash', NAVIGATION_SCRIPT, map_name],
+                ['bash', str(NAVIGATION_SCRIPT), map_name],
                 stdout=open(log_file, 'a'),
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
-                cwd='/home/ros/ZMG/sigu/rtk'
+                cwd=str(PROJECT_ROOT)
             )
             print(f'✅ 导航脚本已启动，PID: {process.pid}，日志：{log_file}')
 
@@ -115,7 +118,7 @@ def start_navigation():
 def stop_navigation():
     """停止导航服务"""
     try:
-        if not os.path.exists(STOP_NAVIGATION_SCRIPT):
+        if not STOP_NAVIGATION_SCRIPT.exists():
             return jsonify({
                 'success': False,
                 'error': f'停止脚本不存在：{STOP_NAVIGATION_SCRIPT}'
@@ -125,7 +128,7 @@ def stop_navigation():
 
         try:
             result = subprocess.run(
-                ['bash', STOP_NAVIGATION_SCRIPT],
+                ['bash', str(STOP_NAVIGATION_SCRIPT)],
                 capture_output=True,
                 text=True,
                 timeout=30

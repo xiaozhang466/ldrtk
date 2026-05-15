@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.mapping_state import MappingStateManager, MappingStatus
+from config.config import Config
 import os
 import json
 import shutil
@@ -12,7 +13,7 @@ maps_bp = Blueprint('maps', __name__, url_prefix='/api/maps')
 # 全局状态管理器实例
 state_manager = MappingStateManager()
 
-MAP_BASE_PATH = Path('/home/ros/ZMG/sigu/rtk/data/maps')
+MAP_BASE_PATH = Path(Config.MAP_BASE_PATH)
 
 
 def get_map_type(map_info: dict) -> str:

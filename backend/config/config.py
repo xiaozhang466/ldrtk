@@ -1,5 +1,11 @@
 import os
 import secrets
+from pathlib import Path
+
+
+PROJECT_ROOT_PATH = Path(
+    os.environ.get('RTK_ROOT', Path(__file__).resolve().parents[2])
+).resolve()
 
 class Config:
     """应用配置"""
@@ -19,8 +25,10 @@ class Config:
     JWT_CSRF_HEADER_NAME = 'X-CSRFToken'
     
     # 文件路径
-    MAP_BASE_PATH = '/home/ros/ZMG/sigu/rtk/data/maps'
-    CONFIG_PATH = '/home/ros/ZMG/sigu/rtk/data/config'
+    PROJECT_ROOT = str(PROJECT_ROOT_PATH)
+    DATA_PATH = str(PROJECT_ROOT_PATH / 'data')
+    MAP_BASE_PATH = str(PROJECT_ROOT_PATH / 'data' / 'maps')
+    CONFIG_PATH = str(PROJECT_ROOT_PATH / 'data' / 'config')
     
     # 用户配置
     DEFAULT_USERNAME = 'admin'

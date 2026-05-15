@@ -22,6 +22,7 @@ from routes.path import path_bp
 
 from routes.gps_map import gps_map_bp
 from routes.navigation import navigation_bp
+from routes.rtk import rtk_bp
 
 def create_app():
     """创建 Flask 应用"""
@@ -54,6 +55,7 @@ def create_app():
     app.register_blueprint(maps_bp)
     app.register_blueprint(path_bp)
     app.register_blueprint(navigation_bp)
+    app.register_blueprint(rtk_bp)
 
     # 健康检查
     @app.route('/api/health', methods=['GET'])
@@ -67,7 +69,7 @@ def create_app():
     @app.route('/static/maps/<map_name>/<path:filename>')
     def serve_map_file(map_name, filename):
         """提供地图文件静态服务 (PCD/PGM/YAML 等)"""
-        maps_dir = '/home/ros/ZMG/sigu/rtk/data/maps'
+        maps_dir = app.config['MAP_BASE_PATH']
         map_path = os.path.join(maps_dir, map_name)
         if not os.path.exists(map_path):
             return jsonify({'error': '地图目录不存在'}), 404

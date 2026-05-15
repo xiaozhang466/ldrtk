@@ -72,9 +72,24 @@ export interface MapsResponse {
   total: number
 }
 
+export interface RtkOriginResponse {
+  success: boolean
+  lat: number
+  lon: number
+  lng?: number
+  alt: number
+  fixed?: boolean
+  fix_quality?: number | null
+  navsat_status?: number | null
+  source_topic?: string
+}
+
 export const mapsApi = {
   // 获取地图列表
   getMaps: () => request<MapsResponse>('/maps', { method: 'GET' }),
+
+  // 获取当前 RTK 固定解坐标
+  getRtkOrigin: () => request<RtkOriginResponse>('/rtk/origin', { method: 'GET' }),
   
   // 创建地图（支持完整对象）
   createMap: (mapData: { name: string; origin?: { lat: number; lon: number; alt: number } }) => request('/maps', {

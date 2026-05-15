@@ -15,11 +15,12 @@ import os
 import json
 import math
 from datetime import datetime
+from config.config import Config
 
 gps_map_bp = Blueprint('gps_map', __name__, url_prefix='/api/gps_map')
 
 # 地图存储目录
-MAPS_DIR = '/home/ros/ZMG/sigu/rtk/data/maps'
+MAPS_DIR = Config.MAP_BASE_PATH
 
 # 确保目录存在
 os.makedirs(MAPS_DIR, exist_ok=True)

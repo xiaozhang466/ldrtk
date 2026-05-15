@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
-export RTK_ROOT="/home/ros/ZMG/sigu/rtk"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${RTK_ROOT:-}" ]; then
+  export RTK_ROOT="$(cd "$RTK_ROOT" && pwd)"
+else
+  export RTK_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
 export RTK_NAV_WS="$RTK_ROOT/nav"
 export RTK_DATA_DIR="$RTK_ROOT/data"
 export RTK_LOG_DIR="$RTK_DATA_DIR/logs"

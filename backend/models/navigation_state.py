@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 from enum import Enum
+from config.config import Config
 
 
 class NavigationStatus(Enum):
@@ -20,8 +21,8 @@ class NavigationStatus(Enum):
 class NavigationStateManager:
     """导航状态管理器 — WAL 日志 + 定期快照"""
 
-    def __init__(self, base_path: str = '/home/ros/ZMG/sigu/rtk/data/maps'):
-        self.base_path = Path(base_path)
+    def __init__(self, base_path: str = None):
+        self.base_path = Path(base_path or Config.MAP_BASE_PATH)
         self.state_file = self.base_path / '.navigation_state.json'
         self.state_backup = self.base_path / '.navigation_state.json.bak'
         self.wal_file = self.base_path / '.navigation_wal.log'

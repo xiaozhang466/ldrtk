@@ -46,7 +46,7 @@ const Home = () => {
     chassisModel: '履带通用底盘C系列',
     softwareVersion: 'v2.0.0',
     rosVersion: 'ROS1 Noetic',
-    workspace: '/home/ros/ZMG/sigu/rtk',
+    workspace: '由 RTK_ROOT 自动识别',
     lastUpdate: '2026-04-14',
   }
 

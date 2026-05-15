@@ -7,16 +7,23 @@
 
 ## RTK 迁移项目启动方式
 
+先在项目根目录设置 `RTK_ROOT`：
+
+```bash
+cd /path/to/rtk
+export RTK_ROOT="$(pwd)"
+```
+
 在迁移项目中，本服务独立放在：
 
 ```bash
-/home/ros/ZMG/sigu/rtk/tianditu-proxy
+$RTK_ROOT/tianditu-proxy
 ```
 
 启动：
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk/tianditu-proxy
+cd "$RTK_ROOT/tianditu-proxy"
 ./start.sh
 ```
 
@@ -29,7 +36,7 @@ cd /home/ros/ZMG/sigu/rtk/tianditu-proxy
 日志：
 
 ```bash
-/home/ros/ZMG/sigu/rtk/data/logs/tianditu_proxy.log
+$RTK_ROOT/data/logs/tianditu_proxy.log
 ```
 
 前端访问地址保持独立代理形式：
@@ -43,7 +50,7 @@ http://<host>:5001/api/tianditu
 ## 📦 项目结构
 
 ```
-/home/ros/ZMG/sigu/rtk/tianditu-proxy/
+$RTK_ROOT/tianditu-proxy/
 ├── app.py                 # 主应用
 ├── config.py              # 配置文件
 ├── requirements.txt       # Python 依赖
@@ -58,24 +65,17 @@ http://<host>:5001/api/tianditu
 ### 1. 安装依赖
 
 ```bash
-cd /home/ros/ZMG/sigu/rtk/tianditu-proxy
+cd "$RTK_ROOT/tianditu-proxy"
 pip3 install -r requirements.txt
 ```
 
 ### 2. 配置服务
 
-编辑 `config.py`:
+启动前通过环境变量注入现场 Token：
 
-```python
-# API 访问 Token（防止盗链）
-API_TOKEN = 'sigu_tdt_2026_secure_token'
-
-# 服务端口
-PORT = 5001
-
-# 缓存配置
-CACHE_TTL = 3600  # 秒
-CACHE_MAX_SIZE = 1000  # 瓦片数
+```bash
+export TIANDITU_TOKEN="你的天地图Token"
+export TIANDITU_API_TOKEN="sigu_tdt_2026_secure_token"
 ```
 
 ### 3. 启动服务
@@ -151,7 +151,7 @@ curl "http://localhost:5001/api/tianditu/img_w/5/10/20"
 
 ```bash
 # 设置配置文件权限
-chmod 600 /home/ros/ZMG/sigu/rtk/tianditu-proxy/config.py
+chmod 600 "$RTK_ROOT/tianditu-proxy/config.py"
 ```
 
 ### Git 安全
@@ -177,8 +177,8 @@ After=network.target
 [Service]
 Type=simple
 User=sigu
-WorkingDirectory=/home/ros/ZMG/sigu/rtk/tianditu-proxy
-ExecStart=/usr/bin/python3 /home/ros/ZMG/sigu/rtk/tianditu-proxy/app.py
+WorkingDirectory=/path/to/rtk/tianditu-proxy
+ExecStart=/usr/bin/python3 /path/to/rtk/tianditu-proxy/app.py
 Restart=always
 
 [Install]
@@ -283,7 +283,7 @@ viewer.imageryLayers.addImageryProvider(tdtImg);
 
 2. **启动独立服务**
    ```bash
-   cd /home/ros/ZMG/sigu/rtk/tianditu-proxy
+   cd "$RTK_ROOT/tianditu-proxy"
    python3 app.py
    ```
 
