@@ -117,12 +117,16 @@ export const mapsApi = {
 // ==================== 建图控制 API ====================
 
 export interface MappingStatus {
-  status: 'idle' | 'running' | 'paused' | 'completed' | 'error'
+  status: 'idle' | 'starting' | 'running' | 'stopping' | 'saving' | 'saved' | 'converting' | 'completed' | 'error' | 'disabled'
   map_name?: string
   frame_count: number
   trajectory_points: number
   duration_seconds: number
   started_at?: string
+  phase?: string
+  lidar_ready?: boolean
+  imu_ready?: boolean
+  mapping_ready?: boolean
   error_message?: string
 }
 

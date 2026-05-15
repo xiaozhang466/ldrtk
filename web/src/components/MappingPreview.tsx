@@ -400,8 +400,8 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
       try {
         console.log('[MappingPreview] 检查 ROS 连接状态:', connected, 'ros:', !!ros)
         if (connected && ros && typeof ros.subscribe === 'function') {
-          console.log('[MappingPreview] 订阅实时点云话题：/mapping/cloud_unavailable (前端累积)')
-          unsubscribe = ros.subscribe('/mapping/cloud_unavailable', (msg: any) => {
+          console.log('[MappingPreview] 订阅实时点云话题：/cloud_registered (前端累积)')
+          unsubscribe = ros.subscribe('/cloud_registered', (msg: any) => {
             try {
               // 累积新点云
               handlePointCloudMessage(msg, true)  // 传入 true 表示累积模式

@@ -39,8 +39,8 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
     console.log('MappingControl: effectiveMapName =', effectiveMapName)
   }, [mapName, urlMapName])
   
-  // 使用全局 ROS 实例 (单例共享)
-  const { ros, connected: rosConnected } = useRos()
+  // ROS 连接只影响实时点云预览；建图启动由后端 API 执行
+  const { connected: rosConnected } = useRos()
   
   const [status, setStatus] = useState<MappingStatus | null>(null)
   const [loading, setLoading] = useState(false)
@@ -48,8 +48,8 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
   const [logs, setLogs] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'warning' | 'error' }>>([])
   const logsEndRef = useRef<HTMLDivElement>(null)
   
-  // ROS 连接状态
-  const [rosError, setRosError] = useState<string | null>(null)  // ROS 断开错误
+  // 状态读取和地图冲突
+  const [statusError, setStatusError] = useState<string | null>(null)
   const [mapConflict, setMapConflict] = useState<string | null>(null)  // 其他地图在建图
   
   // 地图列表状态
@@ -108,32 +108,14 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
     try {
       console.log('调用 API 开始建图:', mapToUse)
       await mappingApi.startMapping(mapToUse)
-      addLog(`建图请求已发送，等待 ROS 状态更新...`, 'info')
-      
-      // 等待 ROS 状态变化为 running（最多等待 30 秒）
-      // 状态更新通过 ROS 订阅自动完成，这里用定时器检查
-      let waitTime = 0
-      const checkInterval = setInterval(() => {
-        waitTime += 500
-        console.log('[handleStart] 检查状态...', status?.status, waitTime)
-        
-        if (status?.status === 'running') {
-          clearInterval(checkInterval)
-          message.success(`建图任务已启动：${mapToUse}`)
-          addLog(`建图任务已开始`, 'success')
-          setLoading(false)
-        } else if (waitTime >= 30000) {
-          clearInterval(checkInterval)
-          message.warning('建图启动超时，请检查 ROS 状态')
-          addLog('建图启动超时', 'warning')
-          setLoading(false)
-        }
-      }, 500)
-      
+      message.success(`建图启动中：${mapToUse}`)
+      addLog('启动请求已发送：先启动雷达和 IMU，稳定后启动建图', 'info')
     } catch (error: any) {
       console.error('建图启动失败:', error)
       message.error(`启动失败：${error.message}`)
       addLog(`启动失败：${error.message}`, 'error')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -144,7 +126,6 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
       await mappingApi.stopMapping()
       message.success('建图任务已停止')
       addLog('建图任务已停止', 'warning')
-      // 状态通过 ROS 订阅自动更新，无需轮询
     } catch (error: any) {
       message.error(`停止失败：${error.message}`)
       addLog(`停止失败：${error.message}`, 'error')
@@ -168,83 +149,60 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
     }
   }
 
-  // ROS 订阅唯一数据源（无 HTTP 轮询）
+  // 后端状态轮询：后端负责启动雷达、IMU 和 FAST-LIVO2
   useEffect(() => {
-    console.log('[MappingControl] ROS 订阅 effect: rosConnected=', rosConnected)
-    
-    let stateUnsubscribe: (() => void) | null = null
+    let cancelled = false
     let lastStatus: string | null = null
     
-    const subscribeToState = () => {
-      if (!rosConnected || !ros || typeof ros.subscribe !== 'function') {
-        console.log('[MappingControl] ROS 未连接，显示错误')
-        setRosError('ROS 连接断开，请等待...')
-        setStatus(null)
-        // 等待 1 秒重试
-        setTimeout(subscribeToState, 1000)
-        return
-      }
-      
-      // ROS 已连接，清除错误
-      setRosError(null)
-      console.log('[MappingControl] 订阅状态话题：/mapping/state_unavailable')
-      
-      stateUnsubscribe = ros.subscribe('/mapping/state_unavailable', (msg: any) => {
-        console.log('[MappingControl] 收到状态:', msg.data)
-        
-        // ROS 恢复连接，清除错误
-        if (rosError) {
-          setRosError(null)
-          addLog('ROS 连接已恢复', 'success')
-        }
-        
-        try {
-          const state = JSON.parse(msg.data)
-          
-          // 检查地图冲突：其他地图正在建图
-          if (state.status === 'running' && state.map_name && state.map_name !== effectiveMapName) {
-            setMapConflict(state.map_name)
-            setStatus(state)
-            return
-          }
-          
-          // 本地图在建图或有数据，清除冲突
+    const loadStatus = async () => {
+      try {
+        const response = await mappingApi.getStatus()
+        if (cancelled) return
+
+        const state = response.status
+        setStatusError(null)
+
+        if (
+          ['starting', 'running', 'stopping'].includes(state.status)
+          && state.map_name
+          && effectiveMapName
+          && state.map_name !== effectiveMapName
+        ) {
+          setMapConflict(state.map_name)
+        } else {
           setMapConflict(null)
-          setStatus(state)
-          
-          // 状态变化日志
-          if (state.status === 'running' && lastStatus !== 'running') {
+        }
+
+        setStatus(state)
+
+        if (state.status !== lastStatus) {
+          if (state.status === 'starting') {
+            addLog('正在启动雷达和 IMU...', 'info')
+          } else if (state.status === 'running') {
             addLog('建图任务已开始', 'success')
-          } else if (state.status === 'saving') {
-            addLog('正在保存地图...', 'info')
-          } else if (state.status === 'saved') {
-            addLog('地图已保存', 'info')
-          } else if (state.status === 'converting') {
-            addLog('正在生成栅格地图...', 'info')
-          } else if (state.status === 'completed' && lastStatus !== 'completed') {
-            addLog('✅ 建图完成！地图已保存，栅格地图已生成', 'success')
-          } else if (state.status === 'error' && lastStatus !== 'error') {
+          } else if (state.status === 'completed') {
+            addLog('建图完成，数据已保存', 'success')
+          } else if (state.status === 'error') {
             addLog(state.error_message || '建图出错', 'error')
           } else if (state.status === 'idle' && lastStatus === 'running') {
             addLog('建图任务已停止', 'warning')
           }
-          
           lastStatus = state.status
-        } catch (error) {
-          console.error('[MappingControl] 解析状态消息失败:', error)
         }
-      })
-    }
-    
-    // 延迟订阅确保 ROS 连接稳定
-    setTimeout(subscribeToState, 500)
-
-    return () => {
-      if (stateUnsubscribe) {
-        stateUnsubscribe()
+      } catch (error: any) {
+        if (cancelled) return
+        setStatusError(`建图状态读取失败：${error.message}`)
       }
     }
-  }, [rosConnected, ros, effectiveMapName, addLog, rosError])
+
+    loadStatus()
+    const timer = setInterval(loadStatus, 1500)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [effectiveMapName, addLog])
 
   // 自动滚动日志到底部
   useEffect(() => {
@@ -275,6 +233,9 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
       case 'error':
         return { color: '#ff4d4f', text: '错误', icon: <ExclamationCircleOutlined /> }
       case 'starting':
+        if (status?.phase === 'starting_lidar') return { color: '#faad14', text: '启动雷达', icon: <ClockCircleOutlined /> }
+        if (status?.phase === 'starting_imu') return { color: '#faad14', text: '启动 IMU', icon: <ClockCircleOutlined /> }
+        if (status?.phase === 'starting_mapping') return { color: '#faad14', text: '启动建图', icon: <ClockCircleOutlined /> }
         return { color: '#faad14', text: '启动中', icon: <ClockCircleOutlined /> }
       default:
         return { color: '#d9d9d9', text: '空闲', icon: <ClockCircleOutlined /> }
@@ -284,7 +245,7 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
   const statusConfig = status ? getStatusConfig(status.status) : getStatusConfig('idle')
 
   // 是否正在建图或处理中（保存/栅格化）
-  const isProcessing = ['running', 'saving', 'saved', 'converting'].includes(status?.status || '')
+  const isProcessing = ['starting', 'running', 'saving', 'saved', 'converting', 'stopping'].includes(status?.status || '')
 
   // 停止建图确认
   const handleStopWithConfirm = () => {
@@ -295,17 +256,17 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
       cancelText: '不保存',
       okType: 'primary',
       onOk: async () => {
-        // 保存并停止
         try {
+          await mappingApi.stopMapping()
+          message.success('建图任务已停止')
+          addLog('建图任务已停止', 'warning')
           await mappingApi.saveMap()
           message.success('地图已保存')
           addLog('地图已保存', 'success')
         } catch (error: any) {
-          message.error(`保存失败：${error.message}`)
-          addLog(`保存失败：${error.message}`, 'error')
+          message.error(`停止或保存失败：${error.message}`)
+          addLog(`停止或保存失败：${error.message}`, 'error')
         }
-        // 执行停止
-        handleStop()
       },
       onCancel: () => {
         // 直接停止，不保存
@@ -379,14 +340,17 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
           </div>
 
           {/* 建图状态 */}
-          {rosError ? (
-            <Tag color="red">⚠️ {rosError}</Tag>
+          {statusError ? (
+            <Tag color="red">⚠️ {statusError}</Tag>
           ) : mapConflict ? (
             <Tag color="orange">⚠️ {mapConflict} 正在建图</Tag>
           ) : (
             <Tag color={statusConfig.color} style={{ marginLeft: 8 }}>
               {statusConfig.text}
             </Tag>
+          )}
+          {!rosConnected && (
+            <Tag color="orange">点云预览未连接 ROS</Tag>
           )}
         </Space>
 
@@ -399,7 +363,7 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
               icon={<StopOutlined />}
               onClick={handleStopWithConfirm}
               loading={loading}
-              disabled={loading || !!rosError}
+              disabled={loading}
               style={{ height: 36 }}
             >
               停止建图
@@ -410,7 +374,7 @@ const MappingControl: React.FC<MappingControlProps> = ({ mapName, onClose }) => 
               icon={<PlayCircleOutlined />}
               onClick={handleStart}
               loading={loading}
-              disabled={loading || !!rosError || !!mapConflict}
+              disabled={loading || !!mapConflict}
               style={{ height: 36 }}
             >
               开始建图

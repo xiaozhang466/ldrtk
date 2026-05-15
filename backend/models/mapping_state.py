@@ -37,8 +37,14 @@ class MappingStateManager:
             'map_name': None,
             'start_time': None,
             'frame_count': 0,
+            'trajectory_points': 0,
             'trajectory': [],
             'checkpoint_file': None,
+            'phase': None,
+            'lidar_ready': False,
+            'imu_ready': False,
+            'mapping_ready': False,
+            'error_message': None,
             'last_update': None
         }
     
@@ -154,6 +160,7 @@ class MappingStateManager:
             map_name=map_name,
             start_time=datetime.now().isoformat(),
             frame_count=0,
+            trajectory_points=0,
             trajectory=[],
             checkpoint_file=None
         )
