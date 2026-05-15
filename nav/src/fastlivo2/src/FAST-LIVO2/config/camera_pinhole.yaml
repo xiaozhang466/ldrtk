@@ -1,0 +1,31 @@
+# =========================
+# FAST-LIVO2 Camera Intrinsics (Pinhole + radtan)
+# Calibrated with OpenCV from 1280x1024 images
+# Distortion order (OpenCV plumb_bob / radtan):
+#   d0=k1, d1=k2, d2=p1, d3=p2, (k3 ignored if the system only supports 4 params)
+# =========================
+
+cam_model: Pinhole
+cam_width: 1280
+cam_height: 1024
+
+# IMPORTANT:
+# You calibrated at 1280x1024, so keep scale = 1.0 to match intrinsics.
+# If you later set scale=0.5 for speed, fx/fy/cx/cy must also be scaled accordingly.
+scale: 1.0
+
+# Intrinsics
+cam_fx: 1255.6160225361
+cam_fy: 1262.9517983041
+cam_cx: 673.2651529502
+cam_cy: 474.9768918647
+
+# Distortion (radtan: k1, k2, p1, p2)
+cam_d0: -0.0883549664
+cam_d1:  0.1589919173
+cam_d2: -0.0021361744
+cam_d3:  0.0045239374
+
+# OpenCV also estimated k3 = -0.0986088130
+# FAST-LIVO2 config you showed only takes 4 distortion params, so we ignore k3 here.
+# cam_d4: -0.0986088130

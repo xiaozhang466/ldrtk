@@ -1,0 +1,19 @@
+<launch>
+<!-- Launch file for Lslidar C16 LiDAR -->
+
+	<arg name="rviz" default="true" />
+
+	<rosparam command="load" file="$(find fast_livo)/config/lslidar_C16.yaml" />
+
+	<node pkg="fast_livo" type="fastlivo_mapping" name="laserMapping" output="screen">
+		<rosparam file="$(find fast_livo)/config/camera_pinhole.yaml" />
+	</node>
+	
+	<group if="$(arg rviz)">
+		<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find fast_livo)/rviz_cfg/fast_livo2.rviz" />
+	</group>
+	
+    <!-- Optional: Image republish if needed for compression -->
+	<!-- <node pkg="image_transport" type="republish" name="republish" args="compressed in:=/left_camera/image raw out:=/left_camera/image" output="screen" respawn="true"/> -->
+
+</launch> 	
