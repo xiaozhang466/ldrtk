@@ -35,11 +35,8 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
   // 使用全局连接状态
   const rosConnected = connected
   
-  // 累积点云缓冲区 - 保持完整地图 ⭐
-  const accumulatedPoints = useRef<number[]>([])
-  
   // 最大点数限制（防止内存溢出）
-  const MAX_POINTS = 10000000  // 1000 万点
+  const MAX_POINTS = 10000000  // 单帧最多显示 1000 万点
   
   // 点云渲染参数（与 RViz 一致）
   const DEFAULT_POINT_SIZE = 0.01  // 默认点大小：0.01（与 RViz 一致）
@@ -51,6 +48,53 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
   const [isFullscreen, setIsFullscreen] = useState(false)
   const fullscreenContainerRef = useRef<HTMLDivElement>(null)
 
+  const resizeRendererToContainer = useCallback(() => {
+    const container = containerRef.current
+    const camera = cameraRef.current
+    const renderer = rendererRef.current
+    if (!container || !camera || !renderer) return
+
+    const width = Math.max(container.clientWidth, 1)
+    const height = Math.max(container.clientHeight, 1)
+
+    camera.aspect = width / height
+    camera.updateProjectionMatrix()
+    renderer.setSize(width, height)
+    renderer.domElement.style.width = '100%'
+    renderer.domElement.style.height = '100%'
+    renderer.domElement.style.display = 'block'
+  }, [])
+
+  const fitCameraToGeometry = useCallback((geometry: THREE.BufferGeometry) => {
+    if (!cameraRef.current) return
+
+    resizeRendererToContainer()
+
+    const positionsAttribute = geometry.getAttribute('position')
+    if (!positionsAttribute) return
+
+    const box = new THREE.Box3().setFromBufferAttribute(positionsAttribute)
+    if (box.isEmpty()) return
+
+    const size = box.getSize(new THREE.Vector3())
+    const center = box.getCenter(new THREE.Vector3())
+    const maxDim = Math.max(size.x, size.y, size.z)
+    const fov = cameraRef.current.fov * (Math.PI / 180)
+    let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2))
+    cameraZ = Math.max(cameraZ * 1.5, 50)
+
+    cameraRef.current.position.set(center.x, center.y + cameraZ, center.z + cameraZ * 0.5)
+    cameraRef.current.lookAt(center.x, center.y, center.z)
+    controlsRef.current?.target.copy(center)
+    controlsRef.current?.update()
+    cameraAdjusted.current = true
+
+    console.log('[MappingPreview] 调整相机视角:', {
+      size: maxDim.toFixed(1),
+      cameraZ: cameraZ.toFixed(1),
+    })
+  }, [resizeRendererToContainer])
+
   // 初始化 Three.js 场景
   const initScene = useCallback(() => {
     if (!containerRef.current) return
@@ -60,10 +104,13 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
     scene.background = new THREE.Color(0x1a1a2e)
     sceneRef.current = scene
 
+    const initialWidth = Math.max(containerRef.current.clientWidth, 1)
+    const initialHeight = Math.max(containerRef.current.clientHeight, 1)
+
     // 创建相机（等轴测视角 - Y 轴垂直向上，XZ 为地面）
     const camera = new THREE.PerspectiveCamera(
       60,
-      containerRef.current.clientWidth / containerRef.current.clientHeight,
+      initialWidth / initialHeight,
       0.1,
       2000
     )
@@ -75,8 +122,11 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
 
     // 创建渲染器
     const renderer = new THREE.WebGLRenderer({ antialias: true })
-    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
+    renderer.setSize(initialWidth, initialHeight)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))  // 限制像素比，提升性能
+    renderer.domElement.style.width = '100%'
+    renderer.domElement.style.height = '100%'
+    renderer.domElement.style.display = 'block'
     containerRef.current.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
@@ -177,24 +227,23 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
     animate()
 
     // 窗口大小调整
-    const handleResize = () => {
-      if (!containerRef.current || !cameraRef.current || !rendererRef.current) return
-      cameraRef.current.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight
-      cameraRef.current.updateProjectionMatrix()
-      rendererRef.current.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight)
-    }
+    const handleResize = () => resizeRendererToContainer()
     window.addEventListener('resize', handleResize)
+    const resizeObserver = new ResizeObserver(handleResize)
+    resizeObserver.observe(containerRef.current)
+    requestAnimationFrame(handleResize)
 
     return () => {
       window.removeEventListener('resize', handleResize)
+      resizeObserver.disconnect()
       if (containerRef.current && rendererRef.current?.domElement) {
         containerRef.current.removeChild(rendererRef.current.domElement)
       }
       rendererRef.current?.dispose()
     }
-  }, [])
+  }, [resizeRendererToContainer])
 
-  // 简单累积点云，不清除 ⭐
+  // 实时点云显示：每次 ROS 消息替换当前帧，不在前端拼接地图。
   
   // 限制最大点数（后端已降采样，这里仅作为安全限制）
   const limitMaxPoints = useCallback((positions: Float32Array, maxPoints: number = 5000): Float32Array => {
@@ -221,7 +270,7 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
   }, [])
 
   // 处理 ROS 点云消息
-  const handlePointCloudMessage = useCallback((msg: any, accumulate: boolean = false) => {
+  const handlePointCloudMessage = useCallback((msg: any) => {
     if (!sceneRef.current) return
 
     setLoading(true)
@@ -304,28 +353,9 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
         newPoints.push(x, y, z)
       }
 
-      // 累积模式：简单累加，不清除 ⭐
-      let positions: Float32Array
-      if (accumulate) {
-        // 添加新点
-        accumulatedPoints.current.push(...newPoints)
-        
-        // 限制最大点数（防止内存溢出）
-        if (accumulatedPoints.current.length > MAX_POINTS * 3) {
-          accumulatedPoints.current = accumulatedPoints.current.slice(-MAX_POINTS * 3)
-        }
-        
-        positions = new Float32Array(accumulatedPoints.current)
-        
-        console.log('[MappingPreview] 累积点云:', { 
-          newPoints: newPoints.length / 3,
-          totalPoints: positions.length / 3
-        })
-      } else {
-        positions = new Float32Array(newPoints)
-      }
+      const positions = new Float32Array(newPoints)
 
-      // 限制最大点数（100 万点，安全限制）
+      // 限制最大点数（安全限制）
       const limited = limitMaxPoints(positions, MAX_POINTS)
       const finalPointCount = limited.length / 3
 
@@ -341,27 +371,8 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
       geometry.setAttribute('position', new THREE.BufferAttribute(limited, 3))
 
       // 自动调整相机视角（只在首次加载时）
-      if (finalPointCount > 0 && cameraRef.current && !cameraAdjusted.current) {
-        const positionsAttribute = geometry.getAttribute('position')
-        const box = new THREE.Box3().setFromBufferAttribute(positionsAttribute)
-        const size = box.getSize(new THREE.Vector3())
-        const center = box.getCenter(new THREE.Vector3())
-        
-        const maxDim = Math.max(size.x, size.y, size.z)
-        const fov = cameraRef.current.fov * (Math.PI / 180)
-        let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2))
-        cameraZ = Math.max(cameraZ * 1.5, 50)
-        
-        cameraRef.current.position.set(center.x, center.y + cameraZ, center.z + cameraZ * 0.5)
-        cameraRef.current.lookAt(center.x, center.y, center.z)
-        
-        cameraAdjusted.current = true  // 标记已调整
-        
-        console.log('[MappingPreview] 首次调整相机视角:', { 
-          size: maxDim.toFixed(1), 
-          cameraZ: cameraZ.toFixed(1),
-          pointCount: finalPointCount 
-        })
+      if (finalPointCount > 0 && !cameraAdjusted.current) {
+        fitCameraToGeometry(geometry)
       }
 
       // 创建材质（绿色点云）- 与 RViz 一致
@@ -383,7 +394,7 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
     } finally {
       setLoading(false)
     }
-  }, [limitMaxPoints])
+  }, [fitCameraToGeometry, heightFilter, limitMaxPoints])
 
   // 初始化 ROS 订阅 (连接由 RosProvider 全局管理)
   useEffect(() => {
@@ -400,11 +411,10 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
       try {
         console.log('[MappingPreview] 检查 ROS 连接状态:', connected, 'ros:', !!ros)
         if (connected && ros && typeof ros.subscribe === 'function') {
-          console.log('[MappingPreview] 订阅实时点云话题：/cloud_registered (前端累积)')
+          console.log('[MappingPreview] 订阅实时点云话题：/cloud_registered')
           unsubscribe = ros.subscribe('/cloud_registered', (msg: any) => {
             try {
-              // 累积新点云
-              handlePointCloudMessage(msg, true)  // 传入 true 表示累积模式
+              handlePointCloudMessage(msg)
             } catch (error) {
               console.error('[MappingPreview] 处理点云消息失败:', error)
             }
@@ -437,8 +447,6 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
       // 重置相机调整标记和全屏状态
       cameraAdjusted.current = false
       setIsFullscreen(false)
-      // 清除累积点云
-      accumulatedPoints.current = []
       // 不断开 ROS 连接，由 RosProvider 统一管理
     }
   }, [connected, handlePointCloudMessage, ros])
@@ -466,42 +474,17 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement)
+      requestAnimationFrame(resizeRendererToContainer)
     }
     
     document.addEventListener('fullscreenchange', handleFullscreenChange)
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange)
     }
-  }, [])
+  }, [resizeRendererToContainer])
 
   return (
     <div ref={fullscreenContainerRef} style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-      {/* 全屏按钮 - 右上角 */}
-      <div style={{
-        position: 'absolute',
-        top: 12,
-        right: 12,
-        zIndex: 100,
-      }}>
-        <Tooltip title={isFullscreen ? '退出全屏' : '全屏显示'}>
-          <Button
-            type="primary"
-            shape="circle"
-            size="large"
-            icon={isFullscreen ? <FullscreenExitOutlined style={{ fontSize: 20 }} /> : <FullscreenOutlined style={{ fontSize: 20 }} />}
-            onClick={toggleFullscreen}
-            style={{
-              width: 50,
-              height: 50,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-            }}
-          />
-        </Tooltip>
-      </div>
-
       {/* 顶部状态栏 */}
       <div style={{ 
         padding: '8px 12px', 
@@ -512,10 +495,10 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
         alignItems: 'center',
         gap: 12,
       }}>
-        <Space size={8}>
+        <Space size={8} style={{ minWidth: 0, flex: 1 }}>
           {rosConnected ? (
             <Tag color="green" icon={<CheckCircleOutlined />}>
-              点云数据
+              实时点云
             </Tag>
           ) : (
             <Tag color="default" icon={<ExclamationCircleOutlined />}>
@@ -532,7 +515,7 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
             </Tag>
           )}
         </Space>
-        <Space size={8}>
+        <Space size={8} style={{ flexShrink: 0 }}>
           <div style={{ fontSize: 12, color: '#999' }}>
             点数：{pointCount.toLocaleString()}
           </div>
@@ -548,9 +531,8 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
               onChange={(e) => {
                 const value = parseFloat(e.target.value)
                 setHeightFilter(value >= 20 ? null : value)
-                // 清空累积点云，重新累积
-                accumulatedPoints.current = []
                 setPointCount(0)
+                cameraAdjusted.current = false
               }}
               style={{ width: 100, cursor: 'pointer' }}
               title={heightFilter !== null ? `过滤 Z > ${heightFilter}m 的点` : '不过滤'}
@@ -563,14 +545,23 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
           <Button 
             size="small" 
             onClick={() => {
-              cameraAdjusted.current = false
-              // 触发重新渲染以调整相机
-              setPointCount(pointCount)
+              if (pointsRef.current) {
+                fitCameraToGeometry(pointsRef.current.geometry)
+              }
             }}
             style={{ fontSize: 11 }}
           >
             重置视角
           </Button>
+          <Tooltip title={isFullscreen ? '退出全屏' : '全屏显示'}>
+            <Button
+              size="small"
+              shape="circle"
+              icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? '退出全屏' : '全屏显示'}
+            />
+          </Tooltip>
         </Space>
       </div>
 
@@ -636,7 +627,7 @@ const MappingPreview: React.FC<MappingPreviewProps> = ({ mapName, lastLog }) => 
           ROS 坐标系：X 前 (红) Y 左 (绿) Z 上 (蓝) • XY 为地面 • 已转换
           {isFullscreen && ' • 全屏模式'}
           {heightFilter !== null && ` • 高度过滤 Z>${heightFilter}m`}
-          {' • 完整地图累积'}
+          {' • 实时帧：/cloud_registered'}
         </span>
       </div>
     </div>

@@ -64,3 +64,4 @@ output:
 startup_commands:
   - "RTKSTATUSA"
   - "MSPOSA 0.1"
+  - "GPHPR 0.1"

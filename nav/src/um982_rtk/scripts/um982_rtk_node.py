@@ -301,12 +301,59 @@ def strip_unicore_sentence(sentence: str) -> tuple[str, str] | None:
     return header, body
 
 
+def parse_nmea_heading_sentence(sentence: str, heading_offset_deg: float) -> HeadingData | None:
+    sentence = sentence.strip()
+    if not sentence.startswith("$"):
+        return None
+    if not verify_nmea_checksum(sentence):
+        raise ValueError(f"invalid NMEA checksum: {sentence}")
+
+    body = sentence[1:].split("*", 1)[0]
+    fields = body.split(",")
+    if not fields:
+        return None
+    message_name = fields[0]
+
+    if message_name.endswith("HPR"):
+        if len(fields) < 6:
+            return None
+        quality = parse_int(fields[5], default=0)
+        if quality <= 0:
+            return None
+        heading = normalize_heading_deg(float(fields[2]) + heading_offset_deg)
+        return HeadingData(
+            raw=sentence,
+            heading_deg=heading,
+            pitch_deg=parse_float(fields[3]),
+            roll_deg=parse_float(fields[4]),
+            source=message_name,
+        )
+
+    if message_name.endswith("THS") or message_name.endswith("THS2"):
+        if len(fields) < 3 or fields[2] != "T":
+            return None
+        heading = normalize_heading_deg(float(fields[1]) + heading_offset_deg)
+        return HeadingData(
+            raw=sentence,
+            heading_deg=heading,
+            pitch_deg=None,
+            roll_deg=None,
+            source=message_name,
+        )
+
+    return None
+
+
 def parse_heading_sentence(
     sentence: str,
     heading_offset_deg: float,
     min_baseline_m: float,
     max_baseline_m: float,
 ) -> HeadingData | None:
+    nmea_heading = parse_nmea_heading_sentence(sentence, heading_offset_deg)
+    if nmea_heading is not None:
+        return nmea_heading
+
     parsed = strip_unicore_sentence(sentence)
     if not parsed:
         return None
@@ -331,44 +378,13 @@ def parse_heading_sentence(
     if message_name not in ("MSPOSA", "MSPOSB"):
         return None
 
-    sol1_pos = body.find("SOL")
-    if sol1_pos < 0:
-        return None
-    sol2_pos = body.find("SOL", sol1_pos + 1)
-    if sol2_pos < 0:
-        return None
-    ant1_fields = body[sol1_pos:sol2_pos].split(",")
-    ant2_fields = body[sol2_pos:].split(",")
-    if len(ant1_fields) < 8 or len(ant2_fields) < 8:
-        return None
-
-    lat1 = float(ant1_fields[2])
-    lon1 = float(ant1_fields[3])
-    lat2 = float(ant2_fields[2])
-    lon2 = float(ant2_fields[3])
-
-    lat1_rad = math.radians(lat1)
-    lat2_rad = math.radians(lat2)
-    dlat = lat2_rad - lat1_rad
-    dlon = math.radians(lon2 - lon1)
-    baseline_m = math.hypot(dlat, dlon * math.cos(lat1_rad)) * 6371000.0
-    if baseline_m < min_baseline_m or baseline_m > max_baseline_m:
-        return None
-
-    # Bearing from ANT1 to ANT2, converted to vehicle yaw by configured offset.
-    bearing_deg = math.degrees(math.atan2(dlon * math.cos(lat2_rad), dlat))
-    heading = normalize_heading_deg(bearing_deg + heading_offset_deg)
-    return HeadingData(
-        raw=sentence.strip(),
-        heading_deg=heading,
-        pitch_deg=None,
-        roll_deg=None,
-        source=message_name,
-        baseline_m=baseline_m,
-    )
+    # MSPOSA contains two absolute antenna positions. The slave antenna can be
+    # reported as float/single while the receiver's heading engine is still the
+    # authoritative source for attitude, so do not derive heading from MSPOSA.
+    return None
 
 
-def parse_mspos_position(sentence: str) -> tuple[float, float, float] | None:
+def split_mspos_fields(sentence: str) -> list[str] | None:
     parsed = strip_unicore_sentence(sentence)
     if not parsed:
         return None
@@ -376,12 +392,50 @@ def parse_mspos_position(sentence: str) -> tuple[float, float, float] | None:
     message_name = header.split(",", 1)[0]
     if message_name not in ("MSPOSA", "MSPOSB"):
         return None
-    sol1_pos = body.find("SOL")
-    if sol1_pos < 0:
+    return body.split(",")
+
+
+def mspos_diagnostics(sentence: str) -> str | None:
+    fields = split_mspos_fields(sentence)
+    if fields is None or len(fields) < 16:
         return None
-    sol2_pos = body.find("SOL", sol1_pos + 1)
-    ant1_str = body[sol1_pos:sol2_pos] if sol2_pos >= 0 else body[sol1_pos:]
-    fields = ant1_str.split(",")
+    try:
+        master_lat = float(fields[2])
+        master_lon = float(fields[3])
+        master_hgt = float(fields[4])
+        slave_lat = float(fields[13])
+        slave_lon = float(fields[14])
+        slave_hgt = float(fields[15])
+    except (TypeError, ValueError):
+        return None
+
+    master_lat_rad = math.radians(master_lat)
+    slave_lat_rad = math.radians(slave_lat)
+    dlat = slave_lat_rad - master_lat_rad
+    dlon = math.radians(slave_lon - master_lon)
+    horizontal_m = math.hypot(dlat, dlon * math.cos(master_lat_rad)) * 6371000.0
+    vertical_m = slave_hgt - master_hgt
+    distance_3d_m = math.hypot(horizontal_m, vertical_m)
+    bearing_deg = normalize_heading_deg(math.degrees(math.atan2(dlon * math.cos(slave_lat_rad), dlat)))
+
+    master_type = fields[1] if len(fields) > 1 else ""
+    slave_type = fields[12] if len(fields) > 12 else ""
+    master_sol = fields[0] if len(fields) > 0 else ""
+    slave_sol = fields[11] if len(fields) > 11 else ""
+    return (
+        f"master_sol={master_sol} master_type={master_type} "
+        f"master=({master_lat:.10f},{master_lon:.10f},{master_hgt:.3f}) "
+        f"slave_sol={slave_sol} slave_type={slave_type} "
+        f"slave=({slave_lat:.10f},{slave_lon:.10f},{slave_hgt:.3f}) "
+        f"baseline_horizontal={horizontal_m:.3f} baseline_3d={distance_3d_m:.3f} "
+        f"vertical_delta={vertical_m:.3f} bearing_ant1_to_ant2={bearing_deg:.2f}"
+    )
+
+
+def parse_mspos_position(sentence: str) -> tuple[float, float, float] | None:
+    fields = split_mspos_fields(sentence)
+    if fields is None:
+        return None
     if len(fields) < 5:
         return None
     return float(fields[2]), float(fields[3]), float(fields[4])
@@ -481,6 +535,8 @@ class UM982RtkNode:
         self.gga_pub = rospy.Publisher("/rtk/gga_raw", String, queue_size=20)
         self.rtkstatus_pub = rospy.Publisher("/rtk/rtkstatus_raw", String, queue_size=20)
         self.position_type_pub = rospy.Publisher("/rtk/position_type", String, queue_size=20)
+        self.mspos_raw_pub = rospy.Publisher("/rtk/mspos_raw", String, queue_size=20)
+        self.mspos_debug_pub = rospy.Publisher("/rtk/mspos_debug", String, queue_size=20)
         self.heading_pub = rospy.Publisher("/rtk/heading", TwistWithCovarianceStamped, queue_size=10)
         self.heading_alias_pub = rospy.Publisher("/gps/heading", TwistWithCovarianceStamped, queue_size=10) if self.publish_compat_aliases else None
         self.odom_pub = rospy.Publisher("/odometry/rtk", Odometry, queue_size=20)
@@ -711,6 +767,12 @@ class UM982RtkNode:
     def handle_line(self, line: str) -> None:
         if not line:
             return
+
+        if split_mspos_fields(line) is not None:
+            self.mspos_raw_pub.publish(String(data=line.strip()))
+            debug = mspos_diagnostics(line)
+            if debug is not None:
+                self.mspos_debug_pub.publish(String(data=debug))
 
         try:
             gga = parse_gga_sentence(line)

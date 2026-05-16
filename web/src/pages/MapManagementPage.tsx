@@ -58,7 +58,11 @@ const MapManagementPage: React.FC = () => {
           地图管理
         </span>
       ),
-      children: <MapManager onMapSelect={setSelectedMap} onNavigate={switchTab} />,
+      children: (
+        <div className="map-management-tab-pane-content">
+          <MapManager onMapSelect={setSelectedMap} onNavigate={switchTab} />
+        </div>
+      ),
     },
     {
       key: 'mapping',
@@ -68,7 +72,11 @@ const MapManagementPage: React.FC = () => {
           建图控制
         </span>
       ),
-      children: <MappingControl mapName={selectedMap} />,
+      children: (
+        <div className="map-management-tab-pane-content">
+          <MappingControl mapName={selectedMap} />
+        </div>
+      ),
     },
     {
       key: 'viewer',
@@ -78,7 +86,11 @@ const MapManagementPage: React.FC = () => {
           PCD 预览
         </span>
       ),
-      children: <MapPreview mapName={selectedMap} onMapChange={setSelectedMap} />,
+      children: (
+        <div className="map-management-tab-pane-content">
+          <MapPreview mapName={selectedMap} onMapChange={setSelectedMap} />
+        </div>
+      ),
     },
   ]
 
@@ -150,11 +162,12 @@ const MapManagementPage: React.FC = () => {
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '100px 24px 24px 24px' }}>
         <div style={{ background: '#fff', borderRadius: 8, height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column' }}>
           <Tabs
+            className="map-management-tabs"
             activeKey={activeTab}
             onChange={setActiveTab}
             items={items}
             size="large"
-            style={{ height: '100%' }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
             tabBarStyle={{ padding: '16px 24px 0', margin: 0 }}
           />
         </div>
