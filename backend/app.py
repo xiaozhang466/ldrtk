@@ -21,6 +21,8 @@ from routes.maps import maps_bp
 from routes.path import path_bp
 
 from routes.gps_map import gps_map_bp
+from routes.alignment import alignment_bp
+from routes.lidar_localization import lidar_localization_bp
 from routes.navigation import navigation_bp
 from routes.rtk import rtk_bp
 
@@ -54,6 +56,8 @@ def create_app():
     app.register_blueprint(mapping_bp)
     app.register_blueprint(maps_bp)
     app.register_blueprint(path_bp)
+    app.register_blueprint(alignment_bp)
+    app.register_blueprint(lidar_localization_bp)
     app.register_blueprint(navigation_bp)
     app.register_blueprint(rtk_bp)
 

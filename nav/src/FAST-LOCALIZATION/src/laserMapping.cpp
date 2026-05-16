@@ -701,6 +701,33 @@ void map_incremental()
 
 PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI(500000, 1));
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
+
+bool is_blank_path(const string &path)
+{
+    return path.find_first_not_of(" \t\r\n") == string::npos;
+}
+
+string join_path(const string &base, const string &child)
+{
+    if (base.empty())
+    {
+        return child;
+    }
+    if (base.back() == '/')
+    {
+        return base + child;
+    }
+    return base + "/" + child;
+}
+
+string active_map_dir()
+{
+    if (!map_file_path.empty() && !is_blank_path(map_file_path))
+    {
+        return map_file_path;
+    }
+    return join_path(root_dir, "map");
+}
 void publish_frame_world(const ros::Publisher & pubLaserCloudFull)
 {
     if(scan_pub_en)
@@ -982,10 +1009,21 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     solve_time += omp_get_wtime() - solve_start_;
 }
 
-void load_file(ros::Publisher& global_map_pub)
+bool load_file(ros::Publisher& global_map_pub)
 {
+    const string map_dir = active_map_dir();
+    const string pose_path = join_path(map_dir, "pose.json");
+    const string pcd_dir = join_path(map_dir, "pcd");
+
     fstream pose_file;
-    pose_file.open(root_dir + "map/pose.json");
+    pose_file.open(pose_path.c_str());
+    if (!pose_file.is_open())
+    {
+        ROS_ERROR_STREAM("Failed to open FAST-LOCALIZATION pose file: " << pose_path);
+        return false;
+    }
+
+    ROS_INFO_STREAM("Loading FAST-LOCALIZATION map from: " << map_dir);
     double tx, ty, tz, w, x, y, z;
     int count = 0;
     while(pose_file >> tx >> ty >> tz >> w >> x >> y >> z)
@@ -995,7 +1033,13 @@ void load_file(ros::Publisher& global_map_pub)
         position_map.push_back(p);
         pose_map.push_back(q);
         pcl::PointCloud<pcl::PointXYZINormal>::Ptr temp(new pcl::PointCloud<pcl::PointXYZINormal>);
-        pcl::io::loadPCDFile(root_dir + "map/pcd/" + to_string(count) + ".pcd", *temp);
+        const string pcd_path = join_path(pcd_dir, to_string(count) + ".pcd");
+        if (pcl::io::loadPCDFile(pcd_path, *temp) != 0)
+        {
+            ROS_ERROR_STREAM("Failed to load FAST-LOCALIZATION PCD file: " << pcd_path);
+            pose_file.close();
+            return false;
+        }
         scManager.makeAndSaveScancontextAndKeys(*temp);
         pcl::transformPointCloud(*temp, *temp, p, q);
         *global_map += *temp;
@@ -1008,7 +1052,14 @@ void load_file(ros::Publisher& global_map_pub)
     }
     pose_file.close();
     num_map_frames = count;  // Store the number of map frames
+    if (num_map_frames <= 0)
+    {
+        ROS_ERROR_STREAM("FAST-LOCALIZATION map pose file is empty: " << pose_path);
+        return false;
+    }
 
+    ROS_INFO("Loaded %d FAST-LOCALIZATION map frames", num_map_frames);
+    return true;
 }
 
 void global_localization()
@@ -1104,9 +1155,15 @@ void global_localization()
                 T_init_sc.block<3, 3>(0, 0) = Eigen::Matrix3d(yaw);
                 pcl::transformPointCloud(*current_init_pc, *current_init_pc, T_init_sc);
                 ROS_INFO("Global match map id = %d", localization_id);
-                // 加载匹配地图帧 及 状态
+                // 加载匹配地图帧及状态
                 PointCloudXYZI::Ptr current_loop_pc(new PointCloudXYZI);
-                pcl::io::loadPCDFile(root_dir + "map/pcd/" + to_string(localization_id) + ".pcd", *current_loop_pc);
+                const string loop_pcd_path = join_path(join_path(active_map_dir(), "pcd"), to_string(localization_id) + ".pcd");
+                if (pcl::io::loadPCDFile(loop_pcd_path, *current_loop_pc) != 0)
+                {
+                    init_check = 0;
+                    ROS_WARN_STREAM("Failed to load matched FAST-LOCALIZATION PCD file: " << loop_pcd_path);
+                    continue;
+                }
                 Eigen::Vector3d p = position_map[localization_id];
                 Eigen::Quaterniond q = pose_map[localization_id];
 
@@ -1295,7 +1352,12 @@ int main(int argc, char** argv)
     // Load global map immediately; launch files should not require terminal input.
     ROS_INFO("Loading map...");
     // load pcd and build map sc
-    load_file(pubGlobalMap);
+    if (!load_file(pubGlobalMap))
+    {
+        ROS_ERROR("Failed to load FAST-LOCALIZATION map, shutting down laserMapping");
+        ros::shutdown();
+        return 1;
+    }
     // Keep only the raw global map here. The active KD-tree is built after
     // ScanContext or /initialpose succeeds, avoiding a second full-map tree.
     ROS_INFO("Load map successfully");

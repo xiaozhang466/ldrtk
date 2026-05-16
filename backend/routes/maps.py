@@ -52,6 +52,43 @@ def load_map_config(map_name: str) -> dict:
     with open(config_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
+
+def load_alignment_summary(map_name: str) -> dict:
+    """读取每张地图的 RTK-LiDAR 对齐摘要。"""
+    alignment_path = MAP_BASE_PATH / map_name / 'calibration' / 'rtk_lidar.yaml'
+    if not alignment_path.exists():
+        return {
+            'has_alignment': False,
+            'alignment_rmse_m': None,
+            'alignment_max_error_m': None,
+            'alignment_yaw_error_deg': None,
+            'alignment_created_at': None,
+            'alignment_file': None,
+        }
+
+    try:
+        import yaml
+        with alignment_path.open('r', encoding='utf-8') as handle:
+            data = yaml.safe_load(handle) or {}
+        calibration = data.get('calibration') or {}
+        return {
+            'has_alignment': True,
+            'alignment_rmse_m': calibration.get('rmse_m'),
+            'alignment_max_error_m': calibration.get('max_error_m'),
+            'alignment_yaw_error_deg': calibration.get('yaw_check_error_deg'),
+            'alignment_created_at': calibration.get('created_at'),
+            'alignment_file': str(alignment_path.relative_to(MAP_BASE_PATH / map_name)),
+        }
+    except Exception:
+        return {
+            'has_alignment': False,
+            'alignment_rmse_m': None,
+            'alignment_max_error_m': None,
+            'alignment_yaw_error_deg': None,
+            'alignment_created_at': None,
+            'alignment_file': str(alignment_path.relative_to(MAP_BASE_PATH / map_name)),
+        }
+
 @maps_bp.route('', methods=['GET'])
 @jwt_required()
 def get_maps():
@@ -87,6 +124,12 @@ def get_maps():
                     'has_grid_map': False,
                     'has_pcd': False,
                     'has_gps_config': False,
+                    'has_alignment': False,
+                    'alignment_rmse_m': None,
+                    'alignment_max_error_m': None,
+                    'alignment_yaw_error_deg': None,
+                    'alignment_created_at': None,
+                    'alignment_file': None,
                     'gps_origin': None,
                     'files': [],
                     'is_active': item.name == current_map
@@ -138,6 +181,7 @@ def get_maps():
                 map_type = get_map_type(map_info)
                 map_info['map_type'] = map_type
                 map_info['map_type_name'] = get_map_type_name(map_type)
+                map_info.update(load_alignment_summary(item.name))
 
                 # 检查是否正在建图
                 current_state = state_manager.get_state()

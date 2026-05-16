@@ -1,7 +1,7 @@
 /**
  * 地图操作统一 Modal 组件
  * 
- * 支持三种模式：preview, mapping, planning
+ * 支持五种模式：preview, mapping, localization, planning, alignment
  * 支持三种地图类型：local, gps, fusion
  */
 
@@ -24,10 +24,12 @@ import GPSMapView from './GPSMapView'
 import FusionMapView from './FusionMapView'
 import PathPlanning from './PathPlanning'
 import MappingControl from './MappingControl'
+import AlignmentControl from './AlignmentControl'
+import LidarLocalizationControl from './LidarLocalizationControl'
 
 interface MapOperationModalProps {
   mapInfo: MapInfo
-  mode: 'preview' | 'mapping' | 'planning'
+  mode: 'preview' | 'mapping' | 'localization' | 'planning' | 'alignment'
   visible: boolean
   onClose: () => void
 }
@@ -46,7 +48,7 @@ const MapOperationModal: React.FC<MapOperationModalProps> = ({
 
   // 轮询建图状态（仅在非 mapping 模式下轮询，mapping 模式由 MappingControl 组件管理）
   useEffect(() => {
-    if (mode === 'mapping' || !visible) return
+    if (mode === 'mapping' || mode === 'localization' || !visible) return
 
     const pollStatus = async () => {
       try {
@@ -110,7 +112,9 @@ const MapOperationModal: React.FC<MapOperationModalProps> = ({
     const modeText = {
       preview: '预览',
       mapping: '建图',
+      localization: '雷达定位',
       planning: '路径规划',
+      alignment: '坐标对齐',
     }[mode]
 
     const typeText = {
@@ -126,7 +130,7 @@ const MapOperationModal: React.FC<MapOperationModalProps> = ({
   // 渲染建图状态（仅在 preview 模式下显示，mapping 和 planning 模式不需要）
   const renderMappingStatus = () => {
     // mapping 模式由 MappingControl 组件管理，planning 模式不需要显示
-    if (mode === 'mapping' || mode === 'planning') return null
+    if (mode === 'mapping' || mode === 'localization' || mode === 'planning' || mode === 'alignment') return null
     if (!mappingStatus) return null
 
     const statusConfig = {
@@ -174,6 +178,14 @@ const MapOperationModal: React.FC<MapOperationModalProps> = ({
       )
     }
 
+    if (mode === 'localization') {
+      return <LidarLocalizationControl mapName={mapInfo.name} />
+    }
+
+    if (mode === 'alignment') {
+      return <AlignmentControl mapName={mapInfo.name} />
+    }
+
     // 地图预览模式
     switch (mapType) {
       case 'local':
@@ -202,8 +214,8 @@ const MapOperationModal: React.FC<MapOperationModalProps> = ({
       ]
     }
 
-    // mapping 模式由 MappingControl 组件提供所有按钮（开始/停止/关闭），这里不需要 footer
-    if (mode === 'mapping') {
+    // 这些模式由各自控制组件提供操作按钮，这里不需要 footer
+    if (mode === 'mapping' || mode === 'localization' || mode === 'alignment') {
       return null
     }
 

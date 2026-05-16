@@ -11,6 +11,8 @@ import {
   ReloadOutlined,
   CheckCircleOutlined,
   ScheduleOutlined,
+  AimOutlined,
+  RadarChartOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { mapsApi, type MapInfo } from '../api'
@@ -34,7 +36,7 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
   const [editingMap, setEditingMap] = useState<MapTableItem | null>(null)
   const [createModalVisible, setCreateModalVisible] = useState(false)
   const [operationModalVisible, setOperationModalVisible] = useState(false)
-  const [operationMode, setOperationMode] = useState<'preview' | 'mapping' | 'planning'>('preview')
+  const [operationMode, setOperationMode] = useState<'preview' | 'mapping' | 'localization' | 'planning' | 'alignment'>('preview')
   const [operationMapInfo, setOperationMapInfo] = useState<MapTableItem | null>(null)
   const [renameModalVisible, setRenameModalVisible] = useState(false)
   const [renameMapInfo, setRenameMapInfo] = useState<MapTableItem | null>(null)
@@ -245,6 +247,26 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
     setOperationModalVisible(true)
   }
 
+  const handleLidarLocalization = (record: MapTableItem) => {
+    if (!record.has_pcd) {
+      message.warning('该地图尚未保存雷达点云，无法启动雷达定位')
+      return
+    }
+    setOperationMapInfo(record)
+    setOperationMode('localization')
+    setOperationModalVisible(true)
+  }
+
+  const handleAlignment = (record: MapTableItem) => {
+    if (!record.has_pcd) {
+      message.warning('该地图尚未保存雷达点云，无法进行坐标对齐')
+      return
+    }
+    setOperationMapInfo(record)
+    setOperationMode('alignment')
+    setOperationModalVisible(true)
+  }
+
   // 触屏友好的操作按钮样式
   const touchButtonStyle = {
     width: 48,
@@ -313,9 +335,32 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
       },
     },
     {
+      title: '坐标对齐',
+      key: 'alignment',
+      width: 170,
+      render: (_, record) => {
+        if (!record.has_pcd) {
+          return <Tag color="default" style={{ fontSize: 13, padding: '4px 10px' }}>无点云</Tag>
+        }
+        if (!record.has_alignment) {
+          return <Tag color="orange" style={{ fontSize: 13, padding: '4px 10px' }}>未对齐</Tag>
+        }
+        return (
+          <Space size={4} direction="vertical">
+            <Tag color="green" style={{ fontSize: 13, padding: '4px 10px', margin: 0 }}>
+              已对齐
+            </Tag>
+            <span style={{ fontSize: 12, color: '#666' }}>
+              RMSE {record.alignment_rmse_m != null ? `${Number(record.alignment_rmse_m).toFixed(2)}m` : '--'}
+            </span>
+          </Space>
+        )
+      },
+    },
+    {
       title: '操作',
       key: 'action',
-      width: 420,
+      width: 540,
       fixed: 'right',
       align: 'right',
       render: (_, record) => (
@@ -351,6 +396,15 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
             style={touchButtonStyle}
             title="建图"
           />
+          {/* 雷达定位 */}
+          <Button
+            size="large"
+            icon={<RadarChartOutlined />}
+            onClick={() => handleLidarLocalization(record)}
+            style={touchButtonStyle}
+            title="雷达定位"
+            disabled={!record.has_pcd}
+          />
           {/* 规划 */}
           <Button
             size="large"
@@ -358,6 +412,15 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
             onClick={() => handlePathPlanning(record)}
             style={touchButtonStyle}
             title="路径规划"
+          />
+          {/* 坐标对齐 */}
+          <Button
+            size="large"
+            icon={<AimOutlined />}
+            onClick={() => handleAlignment(record)}
+            style={touchButtonStyle}
+            title="坐标对齐"
+            disabled={!record.has_pcd}
           />
           {/* 编辑（重命名） */}
           <Button

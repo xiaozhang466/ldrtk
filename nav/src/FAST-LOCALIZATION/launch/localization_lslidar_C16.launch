@@ -3,6 +3,7 @@
 
 	<arg name="rviz" default="true" />
 	<arg name="publish_tf" default="false" />
+	<arg name="map_file_path" default="" />
 
 	<rosparam command="load" file="$(find fast_localization)/config/lslidar_C16.yaml" />
 
@@ -14,6 +15,7 @@
 	<param name="cube_side_length" type="double" value="1000" />
 	<param name="runtime_pos_log_enable" type="bool" value="0" />
 	<param name="publish/tf_en" type="bool" value="$(arg publish_tf)" />
+	<param name="map_file_path" type="string" value="$(arg map_file_path)" />
 
 	<node pkg="fast_localization" type="fast_localization" name="laserMapping" output="screen" /> 
 

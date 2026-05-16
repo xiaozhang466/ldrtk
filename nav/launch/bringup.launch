@@ -10,7 +10,8 @@
   <arg name="launch_lidar_loc" default="false" />
   <arg name="launch_frame_aligner" default="false" />
   <arg name="lidar_publish_tf" default="true" />
-  <arg name="map_base_path" default="" />
+  <arg name="map_base_path" default="$(find fast_localization)/../../../data/maps" />
+  <arg name="lidar_map_path" default="$(arg map_base_path)/$(arg map_name)/lidar" />
   <arg name="alignment_file" default="" />
   <arg name="chassis_port" default="can0" />
   <arg name="chassis_model" default="ranger_mini_v2" />
@@ -37,6 +38,7 @@
   <include if="$(arg launch_lidar_loc)" file="$(find fast_localization)/launch/localization_lslidar_C16.launch">
     <arg name="rviz" value="false" />
     <arg name="publish_tf" value="$(arg lidar_publish_tf)" />
+    <arg name="map_file_path" value="$(arg lidar_map_path)" />
   </include>
 
   <include if="$(arg launch_frame_aligner)" file="$(find nav_fusion)/launch/frame_alignment.launch">
