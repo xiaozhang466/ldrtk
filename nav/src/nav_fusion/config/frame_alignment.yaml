@@ -1,0 +1,27 @@
+# RTK-LiDAR frame alignment defaults.
+
+topics:
+  rtk_odom: "/odometry/rtk"
+  lidar_odom: "/Odometry"
+  rtk_quality: "/rtk/fix_quality"
+  lidar_in_rtk_odom: "/odometry/lidar_in_rtk"
+  status: "/nav_fusion/alignment_status"
+
+frames:
+  parent: "map"
+  child: "camera_init"
+  output_child: "base_link"
+
+calibration:
+  time_sync_tolerance_sec: 0.1
+  min_rtk_quality: 4
+  min_pairs: 30
+  min_spatial_spread_m: 10.0
+  min_yaw_span_deg: 30.0
+  max_rmse_m: 0.5
+  max_yaw_check_error_deg: 10.0
+  min_sample_distance_m: 0.2
+
+paths:
+  map_base_path: ""
+  alignment_file: ""
