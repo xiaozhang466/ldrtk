@@ -618,19 +618,47 @@ def get_map_files(map_name: str):
         }), 500
 
 
-@maps_bp.route('/<map_name>/pcd/<filename>', methods=['GET'])
+@maps_bp.route('/<map_name>/pcd/<path:filename>', methods=['GET'])
 def get_pcd_file(map_name: str, filename: str):
     """获取 PCD 文件内容（无需认证）"""
     try:
         from flask import send_file
-        
-        file_path = MAP_BASE_PATH / map_name / filename
-        
-        if not file_path.exists():
+
+        map_path = (MAP_BASE_PATH / map_name).resolve()
+        if not map_path.exists() or not map_path.is_dir():
+            return jsonify({
+                'success': False,
+                'error': f'地图 "{map_name}" 不存在'
+            }), 404
+
+        file_path = (map_path / filename).resolve()
+        try:
+            file_path.relative_to(map_path)
+        except ValueError:
+            return jsonify({
+                'success': False,
+                'error': '文件路径非法'
+            }), 400
+
+        if not file_path.exists() and '/' not in filename:
+            matches = sorted(
+                (item for item in map_path.rglob(filename) if item.is_file()),
+                key=lambda item: str(item.relative_to(map_path))
+            )
+            if matches:
+                file_path = matches[0]
+
+        if not file_path.exists() or not file_path.is_file():
             return jsonify({
                 'success': False,
                 'error': f'文件 "{filename}" 不存在'
             }), 404
+
+        if file_path.suffix != '.pcd':
+            return jsonify({
+                'success': False,
+                'error': '只支持读取 PCD 文件'
+            }), 400
         
         return send_file(str(file_path), mimetype='application/octet-stream')
         

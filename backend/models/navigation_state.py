@@ -39,6 +39,7 @@ class NavigationStateManager:
             'start_time': None,
             'localization_status': 'unknown',   # unknown / initializing / ok / error
             'cmd_vel_active': False,
+            'error_message': None,
             'last_update': None
         }
 
@@ -127,26 +128,31 @@ class NavigationStateManager:
             map_name=map_name,
             start_time=datetime.now().isoformat(),
             localization_status='initializing',
-            cmd_vel_active=False
+            cmd_vel_active=False,
+            error_message=None
         )
 
     def running(self):
         self.update_state(
             status=NavigationStatus.RUNNING.value,
             localization_status='ok',
-            cmd_vel_active=True
+            cmd_vel_active=True,
+            error_message=None
         )
 
     def stop_navigation(self):
         self.update_state(
             status=NavigationStatus.IDLE.value,
             cmd_vel_active=False,
-            localization_status='unknown'
+            localization_status='unknown',
+            error_message=None
         )
 
     def error_navigation(self, error_message: str):
         self.update_state(
             status=NavigationStatus.ERROR.value,
+            localization_status='error',
+            cmd_vel_active=False,
             error_message=error_message
         )
 

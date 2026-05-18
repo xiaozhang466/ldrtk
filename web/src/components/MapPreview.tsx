@@ -28,6 +28,17 @@ interface MapFile {
   path: string
 }
 
+interface PointBounds {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  minZ: number
+  maxZ: number
+}
+
+const encodePathSegments = (path: string) => path.split('/').map(encodeURIComponent).join('/')
+
 const MapPreview: React.FC<MapPreviewProps> = ({ mapName, onMapChange }) => {
   const [searchParams] = useSearchParams()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -52,7 +63,7 @@ const MapPreview: React.FC<MapPreviewProps> = ({ mapName, onMapChange }) => {
   const [colorMode, setColorMode] = useState<'height' | 'intensity' | 'single'>('height')
   const [rosConnected, setRosConnected] = useState(false)
   const [frameRate, setFrameRate] = useState(0)
-  const [bounds, setBounds] = useState<{ minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number } | null>(null)
+  const [bounds, setBounds] = useState<PointBounds | null>(null)
   const [fileSize, setFileSize] = useState<string>('')
   
   // 过滤配置
@@ -226,17 +237,17 @@ const MapPreview: React.FC<MapPreviewProps> = ({ mapName, onMapChange }) => {
   // 加载地图文件列表
   const loadMapFiles = async (map: string) => {
     try {
-      const response = await fetch(`/api/maps/${map}/files`, {
+      const response = await fetch(`/api/maps/${encodeURIComponent(map)}/files`, {
         credentials: 'include',
       })
       const data = await response.json()
       if (data.success) {
-        const mapFiles = data.files.filter((f: any) => f.name.endsWith('.pcd'))
+        const mapFiles = data.files.filter((f: any) => (f.path || f.name).endsWith('.pcd'))
         setMapFiles(mapFiles)
         if (mapFiles.length > 0) {
           // 优先选择 GlobalMap.pcd
           const globalMap = mapFiles.find((f: any) => f.name === 'GlobalMap.pcd')
-          setSelectedFile(globalMap ? globalMap.name : mapFiles[0].name)
+          setSelectedFile(globalMap ? globalMap.path : mapFiles[0].path)
         } else {
           setSelectedFile('')
           message.info('该地图下没有地图文件')
@@ -248,25 +259,32 @@ const MapPreview: React.FC<MapPreviewProps> = ({ mapName, onMapChange }) => {
   }
 
   // 适配视角
-  const fitToView = () => {
-    if (!bounds || !cameraRef.current || !controlsRef.current) return
+  const fitToBounds = (targetBounds: PointBounds, showMessage = true) => {
+    if (!cameraRef.current || !controlsRef.current) return
     
-    const centerX = (bounds.minX + bounds.maxX) / 2
-    const centerY = (bounds.minY + bounds.maxY) / 2
-    const centerZ = (bounds.minZ + bounds.maxZ) / 2
+    const centerX = (targetBounds.minX + targetBounds.maxX) / 2
+    const centerY = (targetBounds.minY + targetBounds.maxY) / 2
+    const centerZ = (targetBounds.minZ + targetBounds.maxZ) / 2
     
-    const sizeX = bounds.maxX - bounds.minX
-    const sizeY = bounds.maxY - bounds.minY
-    const sizeZ = bounds.maxZ - bounds.minZ
+    const sizeX = targetBounds.maxX - targetBounds.minX
+    const sizeY = targetBounds.maxY - targetBounds.minY
+    const sizeZ = targetBounds.maxZ - targetBounds.minZ
     const maxDim = Math.max(sizeX, sizeY, sizeZ)
     
-    const distance = maxDim * 1.5
+    const distance = Math.max(maxDim * 1.5, 10)
     cameraRef.current.position.set(centerX + distance, centerY + distance * 0.5, centerZ + distance)
     cameraRef.current.lookAt(centerX, centerY, centerZ)
     controlsRef.current.target.set(centerX, centerY, centerZ)
     controlsRef.current.update()
     
-    message.success('已适配视角')
+    if (showMessage) {
+      message.success('已适配视角')
+    }
+  }
+
+  const fitToView = () => {
+    if (!bounds) return
+    fitToBounds(bounds)
   }
 
   // 重置视角
@@ -427,7 +445,7 @@ const MapPreview: React.FC<MapPreviewProps> = ({ mapName, onMapChange }) => {
     setProgress(0)
     
     try {
-      const response = await fetch(`/api/maps/${map}/pcd/${filename}`, {
+      const response = await fetch(`/api/maps/${encodeURIComponent(map)}/pcd/${encodePathSegments(filename)}`, {
         credentials: 'include',
       })
 
@@ -437,129 +455,126 @@ const MapPreview: React.FC<MapPreviewProps> = ({ mapName, onMapChange }) => {
 
       // 获取总大小
       const totalSize = parseInt(response.headers.get('content-length') || '0')
-      const file = mapFiles.find(f => f.name === filename)
+      const file = mapFiles.find(f => f.path === filename)
       const fileSize = file ? file.size : totalSize
       
       if (fileSize) {
         setFileSize((fileSize / (1024 * 1024)).toFixed(2) + ' MB')
       }
 
-      // 流式读取以显示进度
-      const reader = response.body?.getReader()
-      if (!reader) {
-        // 回退到传统方式
-        const arrayBuffer = await response.arrayBuffer()
-        const blob = new Blob([arrayBuffer])
-        const url = URL.createObjectURL(blob)
-        
-        loaderRef.current.load(
-          url,
-          (pcd) => {
-            URL.revokeObjectURL(url)
+      const arrayBuffer = await response.arrayBuffer()
+      setProgress(100)
 
-          // 清除旧点云
-          if (pointsRef.current && sceneRef.current) {
-            sceneRef.current.remove(pointsRef.current)
-            pointsRef.current.geometry.dispose()
-            (pointsRef.current.material as THREE.Material).dispose()
+      const pcd = loaderRef.current.parse(arrayBuffer)
+      if (!pcd.geometry?.attributes.position) {
+        throw new Error('PCD 文件没有可解析的 position 点数据')
+      }
+
+      // 清除旧点云
+      if (pointsRef.current && sceneRef.current) {
+        sceneRef.current.remove(pointsRef.current)
+        pointsRef.current.geometry.dispose()
+        ;(pointsRef.current.material as THREE.Material).dispose()
+        pointsRef.current = null
+      }
+
+      const originalPointCount = pcd.geometry.attributes.position.count
+
+      // 应用过滤并创建点云
+      const filteredGeometry = applyFilters(pcd.geometry, filters)
+      const positionAttribute = filteredGeometry.attributes.position
+      if (!positionAttribute || positionAttribute.count === 0) {
+        setBounds(null)
+        setPointCount(originalPointCount)
+        setFilteredPointCount(0)
+        message.warning('PCD 文件已读取，但过滤后没有可显示的点')
+        return
+      }
+
+      // 坐标转换：PCD (X 前，Y 左，Z 上) → Three.js (X 右，Y 上，Z 前)
+      // 与 MappingPreview 保持一致
+      const positions = positionAttribute.array
+      for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i]      // PCD X
+        const y = positions[i + 1]  // PCD Y
+        const z = positions[i + 2]  // PCD Z (高度)
+
+        // 转换：Z 轴向上 → Y 轴向上
+        positions[i] = -y           // PCD Y (左) → Three.js -X (左)
+        positions[i + 1] = z        // PCD Z (上) → Three.js Y (上)
+        positions[i + 2] = -x       // PCD X (前) → Three.js -Z (前)
+      }
+      filteredGeometry.attributes.position.needsUpdate = true
+
+      // 计算边界和着色
+      const colors = new Float32Array(positions.length)
+
+      let minX = Infinity, maxX = -Infinity
+      let minY = Infinity, maxY = -Infinity
+      let minZ = Infinity, maxZ = -Infinity
+
+      for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i]
+        const y = positions[i + 1]
+        const z = positions[i + 2]
+        minX = Math.min(minX, x)
+        maxX = Math.max(maxX, x)
+        minY = Math.min(minY, y)
+        maxY = Math.max(maxY, y)
+        minZ = Math.min(minZ, z)
+        maxZ = Math.max(maxZ, z)
+      }
+
+      // 根据模式设置颜色
+      const heightRange = maxZ - minZ || 1
+      for (let i = 0; i < positions.length; i += 3) {
+        const z = positions[i + 2]
+
+        let r, g, b
+        if (colorMode === 'height') {
+          const t = (z - minZ) / heightRange
+          if (t < 0.5) {
+            r = 0
+            g = t * 2
+            b = 1 - t * 2
+          } else {
+            r = (t - 0.5) * 2
+            g = 1 - (t - 0.5) * 2
+            b = 0
           }
-
-          // 应用过滤并创建点云
-          const filteredGeometry = applyFilters(pcd.geometry, filters)
-          
-          // 坐标转换：PCD (X 前，Y 左，Z 上) → Three.js (X 右，Y 上，Z 前)
-          // 与 MappingPreview 保持一致
-          const positions = filteredGeometry.attributes.position.array
-          for (let i = 0; i < positions.length; i += 3) {
-            const x = positions[i]      // PCD X
-            const y = positions[i + 1]  // PCD Y
-            const z = positions[i + 2]  // PCD Z (高度)
-            
-            // 转换：Z 轴向上 → Y 轴向上
-            positions[i] = -y           // PCD Y (左) → Three.js -X (左)
-            positions[i + 1] = z        // PCD Z (上) → Three.js Y (上)
-            positions[i + 2] = -x       // PCD X (前) → Three.js -Z (前)
-          }
-          filteredGeometry.attributes.position.needsUpdate = true
-          
-          // 计算边界和着色
-          const colors = new Float32Array(positions.length)
-          
-          let minX = Infinity, maxX = -Infinity
-          let minY = Infinity, maxY = -Infinity
-          let minZ = Infinity, maxZ = -Infinity
-
-          for (let i = 0; i < positions.length; i += 3) {
-            const x = positions[i]
-            const y = positions[i + 1]
-            const z = positions[i + 2]
-            minX = Math.min(minX, x)
-            maxX = Math.max(maxX, x)
-            minY = Math.min(minY, y)
-            maxY = Math.max(maxY, y)
-            minZ = Math.min(minZ, z)
-            maxZ = Math.max(maxZ, z)
-          }
-          
-          // 根据模式设置颜色
-          const heightRange = maxZ - minZ || 1
-          for (let i = 0; i < positions.length; i += 3) {
-            const x = positions[i]
-            const y = positions[i + 1]
-            const z = positions[i + 2]
-            
-            let r, g, b
-            if (colorMode === 'height') {
-              const t = (z - minZ) / heightRange
-              if (t < 0.5) {
-                r = 0
-                g = t * 2
-                b = 1 - t * 2
-              } else {
-                r = (t - 0.5) * 2
-                g = 1 - (t - 0.5) * 2
-                b = 0
-              }
-            } else if (colorMode === 'intensity') {
-              const intensity = filteredGeometry.attributes.intensity?.array[i / 3] || 0
-              const t = Math.min(intensity / 255, 1)
-              r = g = b = t
-            } else {
-              r = g = b = 1
-            }
-            
-            colors[i] = r
-            colors[i + 1] = g
-            colors[i + 2] = b
-          }
-          
-          filteredGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-          
-          const material = new THREE.PointsMaterial({
-            size: pointSize,
-            sizeAttenuation: true,
-            vertexColors: colorMode !== 'single',
-            color: 0xffffff,
-          })
-
-          const pointCloud = new THREE.Points(filteredGeometry, material)
-          pointsRef.current = pointCloud
-          sceneRef.current!.add(pointCloud)
-
-          setBounds({ minX, maxX, minY, maxY, minZ, maxZ })
-          setPointCount(Math.floor(positions.length / 3))
-          setFilteredPointCount(Math.floor(positions.length / 3))
-
-          // 自动适配视角
-          setTimeout(fitToView, 100)
-        },
-        undefined,
-        (error) => {
-          console.error('加载 PCD 失败:', error)
-          message.error('加载 PCD 文件失败')
-          setLoading(false)
+        } else if (colorMode === 'intensity') {
+          const intensity = filteredGeometry.attributes.intensity?.array[i / 3] || 0
+          const t = Math.min(intensity / 255, 1)
+          r = g = b = t
+        } else {
+          r = g = b = 1
         }
-      )}
+
+        colors[i] = r
+        colors[i + 1] = g
+        colors[i + 2] = b
+      }
+
+      filteredGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+
+      const material = new THREE.PointsMaterial({
+        size: pointSize,
+        sizeAttenuation: true,
+        vertexColors: colorMode !== 'single',
+        color: 0xffffff,
+      })
+
+      const pointCloud = new THREE.Points(filteredGeometry, material)
+      pointsRef.current = pointCloud
+      sceneRef.current!.add(pointCloud)
+
+      const nextBounds = { minX, maxX, minY, maxY, minZ, maxZ }
+      setBounds(nextBounds)
+      setPointCount(originalPointCount)
+      setFilteredPointCount(positionAttribute.count)
+
+      // 自动适配视角
+      setTimeout(() => fitToBounds(nextBounds, false), 100)
     } catch (error) {
       console.error('加载点云失败:', error)
       message.error('加载失败')
@@ -654,7 +669,10 @@ const MapPreview: React.FC<MapPreviewProps> = ({ mapName, onMapChange }) => {
               <Select
                 value={selectedFile}
                 onChange={setSelectedFile}
-                options={mapFiles.map((f) => ({ value: f.name, label: f.name }))}
+                options={mapFiles.map((f) => ({
+                  value: f.path,
+                  label: f.path === f.name ? f.name : `${f.name} (${f.path})`,
+                }))}
                 style={{ width: 250 }}
                 size="large"
               />

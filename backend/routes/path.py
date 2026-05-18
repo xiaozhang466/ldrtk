@@ -72,43 +72,40 @@ def wgs84_to_utm(lat: float, lng: float) -> tuple:
 
 def get_map_type_from_config(map_name: str) -> str:
     """
-    从 map_config.json 获取地图类型
-    优先读取 map_config.json 中的 map_type 字段
+    根据地图实际文件和 GPS 配置判断地图类型。
     - fusion: 建图时进行了 GPS 配准
     - gps: 有 GPS 数据，但未配准
     - local: 无 GPS 数据
     """
+    map_path = MAP_BASE_PATH / map_name
     config_path = MAP_BASE_PATH / map_name / 'map_config.json'
-    if not config_path.exists():
-        return 'local'
     
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        
-        # 优先读取 map_type 字段（配准后保存的值）
-        map_type = config.get('map_type')
-        if map_type in ('fusion', 'gps', 'local'):
-            return map_type
-        
-        # 兼容旧逻辑：无 map_type 字段时，根据是否有配准数据推导
-        # fusion 地图会有配准后的轨迹数据或 gpsOrigin
+        config = {}
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f) or {}
+
+        has_pcd = map_path.exists() and any(file.is_file() and file.suffix == '.pcd' for file in map_path.rglob('*'))
         gps_origin = config.get('gpsOrigin')
-        if not gps_origin:
+        if not gps_origin and config.get('gps_fusion', {}).get('enabled'):
             gps_origin = config.get('gps_fusion', {}).get('origin')
-        
+
+        has_gps_config = False
         if gps_origin:
-            lat = gps_origin.get('lat', gps_origin.get('latitude', 0))
-            lon = gps_origin.get('lng', gps_origin.get('longitude', 0))
-            if lat != 0 or lon != 0:
-                # 有 GPS 坐标，检查是否有配准标记
-                # 配准后的地图会有 registered: true 或 trajectory 数据
-                if config.get('registered') or config.get('trajectory'):
-                    return 'fusion'
-                return 'gps'
-        
+            try:
+                lat = float(gps_origin.get('lat', gps_origin.get('latitude', 0)))
+                lon = float(gps_origin.get('lng', gps_origin.get('lon', gps_origin.get('longitude', 0))))
+                has_gps_config = lat != 0 or lon != 0
+            except (TypeError, ValueError):
+                has_gps_config = False
+
+        if has_pcd and has_gps_config:
+            return 'fusion'
+        if has_gps_config:
+            return 'gps'
         return 'local'
-    except:
+    except Exception:
         return 'local'
 
 

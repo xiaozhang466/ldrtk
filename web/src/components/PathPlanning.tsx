@@ -611,6 +611,9 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
     x: pt.x,
     y: pt.y,
     z: pt.z,
+    lat: pt.lat,
+    lng: pt.lng,
+    alt: pt.alt,
     waypointType: pt.waypointType,
   })).filter(pt => pt.x !== undefined && pt.y !== undefined) || []
 

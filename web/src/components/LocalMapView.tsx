@@ -30,6 +30,8 @@ interface MapFile {
   path: string
 }
 
+const encodePathSegments = (path: string) => path.split('/').map(encodeURIComponent).join('/')
+
 interface LocalMapViewProps {
   mapInfo: MapInfo
   mode: 'preview' | 'mapping' | 'planning'
@@ -356,14 +358,14 @@ const LocalMapView: React.FC<LocalMapViewProps> = ({ mapInfo, mode }) => {
   const loadMapFiles = useCallback(async () => {
     if (!mapInfo.name) return
     try {
-      const response = await fetch(`/api/maps/${mapInfo.name}/files`, {
+      const response = await fetch(`/api/maps/${encodeURIComponent(mapInfo.name)}/files`, {
         credentials: 'include',
       })
       const data = await response.json()
       if (data.success) {
         // 只保留 PCD 文件，并按名称排序
         const pcdFiles = data.files
-          .filter((f: any) => f.name.endsWith('.pcd'))
+          .filter((f: any) => (f.path || f.name).endsWith('.pcd'))
           .sort((a: any, b: any) => {
             // 排序优先级：GlobalMap > map_filter > map_radius_filter > 其他
             const order = ['GlobalMap', 'map_filter', 'map_radius_filter']
@@ -375,8 +377,8 @@ const LocalMapView: React.FC<LocalMapViewProps> = ({ mapInfo, mode }) => {
           })
         setMapFiles(pcdFiles)
         // 如果当前选中文件不在列表中，切换到第一个
-        if (pcdFiles.length > 0 && !pcdFiles.find((f: any) => f.name === selectedFile)) {
-          setSelectedFile(pcdFiles[0].name)
+        if (pcdFiles.length > 0 && !pcdFiles.find((f: any) => f.path === selectedFile)) {
+          setSelectedFile(pcdFiles[0].path)
         }
       }
     } catch (error) {
@@ -402,7 +404,7 @@ const LocalMapView: React.FC<LocalMapViewProps> = ({ mapInfo, mode }) => {
       }
 
       // 使用 fetch 加载 PCD 文件（支持认证 cookie）
-      const pcdUrl = `/api/maps/${mapInfo.name}/pcd/${selectedFile}`
+      const pcdUrl = `/api/maps/${encodeURIComponent(mapInfo.name)}/pcd/${encodePathSegments(selectedFile)}`
       console.log('[LocalMapView] 请求 PCD URL:', pcdUrl)
       
       const response = await fetch(pcdUrl, { credentials: 'include' })
@@ -757,8 +759,8 @@ const LocalMapView: React.FC<LocalMapViewProps> = ({ mapInfo, mode }) => {
                 setSelectedFile(value)
               }}
               options={mapFiles.map((f) => ({
-                value: f.name,
-                label: f.name,
+                value: f.path,
+                label: f.path === f.name ? f.name : `${f.name} (${f.path})`,
               }))}
               style={{ width: 220 }}
               dropdownStyle={{ maxWidth: 300 }}
