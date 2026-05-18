@@ -4,6 +4,7 @@ from config.config import Config
 from pathlib import Path
 from datetime import datetime
 import os
+import json
 import signal
 import subprocess
 import threading
@@ -30,8 +31,16 @@ process_maps = {
 }
 
 
+class AlignmentPrerequisiteError(RuntimeError):
+    pass
+
+
 def _alignment_file(map_name: str) -> Path:
     return MAP_BASE_PATH / map_name / 'calibration' / 'rtk_lidar.yaml'
+
+
+def _map_config_file(map_name: str) -> Path:
+    return MAP_BASE_PATH / map_name / 'map_config.json'
 
 
 def _validate_map_name(map_name: str) -> Path:
@@ -41,6 +50,69 @@ def _validate_map_name(map_name: str) -> Path:
     if not map_path.exists() or not map_path.is_dir():
         raise FileNotFoundError(f'地图不存在：{map_name}')
     return map_path
+
+
+def _read_map_config(map_name: str) -> dict:
+    config_file = _map_config_file(map_name)
+    if not config_file.exists():
+        return {}
+    with config_file.open('r', encoding='utf-8') as handle:
+        return json.load(handle) or {}
+
+
+def _float_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _gps_origin_from_config(config: dict) -> Optional[dict]:
+    origin = config.get('gpsOrigin')
+    if not origin:
+        gps_fusion = config.get('gps_fusion') or {}
+        origin = gps_fusion.get('origin') if gps_fusion.get('enabled') else None
+    if not isinstance(origin, dict):
+        return None
+
+    lat = _float_or_none(origin.get('lat', origin.get('latitude')))
+    lng = _float_or_none(origin.get('lng', origin.get('lon', origin.get('longitude'))))
+    alt = _float_or_none(origin.get('alt', origin.get('altitude', 0.0)))
+    if lat is None or lng is None or (lat == 0.0 and lng == 0.0):
+        return None
+    return {'lat': lat, 'lng': lng, 'alt': alt or 0.0}
+
+
+def _has_lidar_map(map_path: Path) -> bool:
+    lidar_dir = map_path / 'lidar'
+    if lidar_dir.exists() and any(lidar_dir.rglob('*.pcd')):
+        return True
+    return any(map_path.rglob('*.pcd'))
+
+
+def _map_requirements(map_name: str) -> dict:
+    map_path = _validate_map_name(map_name)
+    config = _read_map_config(map_name)
+    gps_origin = _gps_origin_from_config(config)
+    has_lidar_map = _has_lidar_map(map_path)
+    return {
+        'has_gps_config': gps_origin is not None,
+        'gps_origin': gps_origin,
+        'has_lidar_map': has_lidar_map,
+        'target_frame': 'map',
+        'target_odometry_topic': '/odometry/rtk',
+        'target_coordinate_system': 'UTM',
+        'output_odometry_topic': '/odometry/lidar_in_rtk',
+    }
+
+
+def _validate_alignment_ready(map_name: str) -> dict:
+    requirements = _map_requirements(map_name)
+    if not requirements['has_gps_config']:
+        raise AlignmentPrerequisiteError('坐标对齐只支持已有 GPS 地图，请先在 GPS 地图中建图')
+    if not requirements['has_lidar_map']:
+        raise AlignmentPrerequisiteError('该 GPS 地图尚未保存雷达点云，请先在这张地图中完成建图并保存')
+    return requirements
 
 
 def _read_alignment_result(map_name: str):
@@ -56,6 +128,7 @@ def _read_alignment_result(map_name: str):
         'child_frame': data.get('child_frame'),
         'translation': data.get('translation') or {},
         'rotation': data.get('rotation') or {},
+        'coordinate_system': data.get('coordinate_system') or {},
         'calibration': calibration,
         'rmse_m': calibration.get('rmse_m'),
         'max_error_m': calibration.get('max_error_m'),
@@ -154,6 +227,7 @@ def _status_payload(map_name: Optional[str] = None) -> dict:
 
     target_map = map_name or active_calibration_map or active_runtime_map
     result = _read_alignment_result(target_map) if target_map else None
+    requirements = _map_requirements(target_map) if target_map else None
 
     if calibration_running:
         status = 'calibrating'
@@ -173,6 +247,7 @@ def _status_payload(map_name: Optional[str] = None) -> dict:
         'active_runtime_map': active_runtime_map,
         'has_alignment': result is not None,
         'result': result,
+        'requirements': requirements,
         'calibration_log': _read_log_tail('calibration'),
         'runtime_log': _read_log_tail('runtime'),
     }
@@ -216,7 +291,7 @@ def start_alignment_calibration():
     try:
         data = request.get_json() or {}
         map_name = str(data.get('map_name', '')).strip()
-        _validate_map_name(map_name)
+        _validate_alignment_ready(map_name)
 
         with process_lock:
             _cleanup_finished()
@@ -240,6 +315,10 @@ def start_alignment_calibration():
         })
     except FileNotFoundError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 404
+    except AlignmentPrerequisiteError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
     except Exception as exc:
         return jsonify({'success': False, 'error': str(exc)}), 500
 
@@ -267,7 +346,7 @@ def start_alignment_runtime():
     try:
         data = request.get_json() or {}
         map_name = str(data.get('map_name', '')).strip()
-        _validate_map_name(map_name)
+        _validate_alignment_ready(map_name)
         if not _read_alignment_result(map_name):
             return jsonify({'success': False, 'error': '该地图尚未完成 RTK-LiDAR 对齐'}), 409
 
@@ -293,6 +372,10 @@ def start_alignment_runtime():
         })
     except FileNotFoundError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 404
+    except AlignmentPrerequisiteError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
     except Exception as exc:
         return jsonify({'success': False, 'error': str(exc)}), 500
 

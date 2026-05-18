@@ -48,6 +48,14 @@ async function request<T>(
 
 // ==================== 地图管理 API ====================
 
+export interface GpsOrigin {
+  lat?: number | string
+  lng?: number | string
+  lon?: number | string
+  alt?: number | string
+  yaw?: number | string
+}
+
 export interface MapInfo {
   name: string
   path: string
@@ -64,7 +72,9 @@ export interface MapInfo {
   alignment_yaw_error_deg?: number | null
   alignment_created_at?: string | null
   alignment_file?: string | null
-  gps_origin?: string
+  gps_origin?: GpsOrigin | null
+  map_type?: 'local' | 'gps' | 'fusion'
+  map_type_name?: string
   files: Array<{
     name: string
     size: number
@@ -164,6 +174,7 @@ export interface AlignmentResult {
   file: string
   parent_frame?: string
   child_frame?: string
+  coordinate_system?: Record<string, any>
   translation?: { x?: number; y?: number; z?: number }
   rotation?: { yaw_rad?: number; yaw_deg?: number }
   calibration?: Record<string, any>
@@ -184,6 +195,7 @@ export interface AlignmentStatus {
   active_runtime_map?: string | null
   has_alignment: boolean
   result?: AlignmentResult | null
+  requirements?: Record<string, any> | null
   calibration_log?: string
   runtime_log?: string
 }
@@ -311,6 +323,12 @@ export interface PathPoint {
   x: number
   y: number
   z: number
+  lat?: number
+  lng?: number
+  alt?: number
+  zone?: number
+  _orig_lat?: number
+  _orig_lng?: number
   // 航点类型: waypoint=途径点(默认), work=作业点, charge=充电点
   waypointType?: WaypointType
 }
@@ -335,6 +353,12 @@ export interface MapConfig {
   width: number
   height: number
   map_type: 'local' | 'gps' | 'fusion'
+  gps_origin?: {
+    lat?: number | string
+    lng?: number | string
+    lon?: number | string
+    alt?: number | string
+  }
 }
 
 // 世界坐标

@@ -3,6 +3,7 @@ from flask_jwt_extended import jwt_required
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
+import json
 import os
 import shlex
 import shutil
@@ -32,6 +33,50 @@ CONVERT_TIMEOUT_SECONDS = int(os.environ.get('MAPPING_CONVERT_TIMEOUT_SECONDS', 
 state_manager = MappingStateManager()
 process_lock = threading.Lock()
 processes: Dict[str, subprocess.Popen] = {}
+
+
+class MappingPrerequisiteError(RuntimeError):
+    pass
+
+
+def _float_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _gps_origin_from_config(config: dict) -> Optional[dict]:
+    origin = config.get('gpsOrigin')
+    if not origin:
+        gps_fusion = config.get('gps_fusion') or {}
+        origin = gps_fusion.get('origin') if gps_fusion.get('enabled') else None
+    if not isinstance(origin, dict):
+        return None
+
+    lat = _float_or_none(origin.get('lat', origin.get('latitude')))
+    lng = _float_or_none(origin.get('lng', origin.get('lon', origin.get('longitude'))))
+    alt = _float_or_none(origin.get('alt', origin.get('altitude', 0.0)))
+    if lat is None or lng is None or (lat == 0.0 and lng == 0.0):
+        return None
+    return {'lat': lat, 'lng': lng, 'alt': alt or 0.0}
+
+
+def _validate_gps_mapping_target(map_name: str) -> Path:
+    map_root = Path(Config.MAP_BASE_PATH) / map_name
+    if not map_root.exists() or not map_root.is_dir():
+        raise FileNotFoundError(f'地图不存在：{map_name}，请先创建 GPS 地图')
+
+    config_file = map_root / 'map_config.json'
+    if not config_file.exists():
+        raise MappingPrerequisiteError('请先创建带 GPS 原点的地图，再从该 GPS 地图入口建图')
+
+    with config_file.open('r', encoding='utf-8') as handle:
+        config = json.load(handle) or {}
+
+    if not _gps_origin_from_config(config):
+        raise MappingPrerequisiteError('当前只支持在已有 GPS 地图中建图，请先为该地图设置 GPS 原点')
+    return map_root
 
 
 def _status_response(state: Optional[dict] = None) -> dict:
@@ -222,12 +267,20 @@ def get_mapping_status():
 @jwt_required()
 def start_mapping():
     data = request.get_json(silent=True) or {}
-    map_name = data.get('map_name')
+    map_name = str(data.get('map_name', '')).strip()
     if not map_name:
         return jsonify({
             'success': False,
             'error': '地图名称不能为空',
         }), 400
+    try:
+        _validate_gps_mapping_target(map_name)
+    except FileNotFoundError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 404
+    except MappingPrerequisiteError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
 
     current_state = state_manager.get_state()
     if current_state.get('status') in [MappingStatus.STARTING.value, MappingStatus.RUNNING.value]:

@@ -368,7 +368,7 @@ const SimpleMapCanvas: React.FC<SimpleMapCanvasProps> = ({
 
     // 恢复状态
     ctx.restore()
-  }, [containerSize, mapImage, imageLoaded, mapDisplay, mapConfig, markers, zoom, pan, worldToCanvas])
+  }, [containerSize, mapImage, imageLoaded, mapDisplay, mapConfig, markers, zoom, pan, worldToCanvas, robotPosition, robotBlink])
 
   // 监听状态变化，重新渲染
   useEffect(() => {

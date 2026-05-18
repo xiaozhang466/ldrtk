@@ -16,6 +16,7 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { mapsApi, type MapInfo } from '../api'
+import { API_BASE } from '../config'
 import MapOperationModal from './MapOperationModal'
 
 interface MapManagerProps {
@@ -28,6 +29,12 @@ interface MapTableItem extends MapInfo {
   size_mb: string
   created_date: string
 }
+
+const truthyFlag = (value: unknown) => value === true || value === 'true'
+const hasGpsConfig = (record: MapInfo) => truthyFlag(record.has_gps_config)
+const hasPcd = (record: MapInfo) => truthyFlag(record.has_pcd)
+const canStartGpsMapping = (record: MapInfo) => hasGpsConfig(record)
+const canAlignMap = (record: MapInfo) => hasGpsConfig(record) && hasPcd(record)
 
 const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
   const [maps, setMaps] = useState<MapTableItem[]>([])
@@ -223,7 +230,7 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
 
   // 预览地图 - 打开操作 Modal
   const handlePreview = (record: MapTableItem) => {
-    if (!record.has_pcd && !record.has_gps_config) {
+    if (!hasPcd(record) && !hasGpsConfig(record)) {
       message.warning('该地图尚未建图，无法预览')
       return
     }
@@ -235,6 +242,10 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
 
   // 建图 - 打开操作 Modal
   const handleStartMapping = (record: MapTableItem) => {
+    if (!canStartGpsMapping(record)) {
+      message.warning('当前流程只支持在已有 GPS 地图中建图，请先创建或选择带 GPS 原点的地图')
+      return
+    }
     setOperationMapInfo(record)
     setOperationMode('mapping')
     setOperationModalVisible(true)
@@ -248,7 +259,7 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
   }
 
   const handleLidarLocalization = (record: MapTableItem) => {
-    if (!record.has_pcd) {
+    if (!hasPcd(record)) {
       message.warning('该地图尚未保存雷达点云，无法启动雷达定位')
       return
     }
@@ -258,7 +269,11 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
   }
 
   const handleAlignment = (record: MapTableItem) => {
-    if (!record.has_pcd) {
+    if (!hasGpsConfig(record)) {
+      message.warning('坐标对齐只支持 GPS 地图中保存的雷达点云')
+      return
+    }
+    if (!hasPcd(record)) {
       message.warning('该地图尚未保存雷达点云，无法进行坐标对齐')
       return
     }
@@ -323,11 +338,11 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
       key: 'type',
       width: 130,
       render: (_, record) => {
-        if (record.has_pcd && record.has_gps_config) {
+        if (hasPcd(record) && hasGpsConfig(record)) {
           return <Tag color="purple" style={{ fontSize: 13, padding: '4px 12px' }}>融合地图</Tag>
-        } else if (record.has_gps_config) {
+        } else if (hasGpsConfig(record)) {
           return <Tag color="blue" style={{ fontSize: 13, padding: '4px 12px' }}>GPS 地图</Tag>
-        } else if (record.has_pcd) {
+        } else if (hasPcd(record)) {
           return <Tag color="green" style={{ fontSize: 13, padding: '4px 12px' }}>本地地图</Tag>
         } else {
           return <Tag color="gray" style={{ fontSize: 13, padding: '4px 12px' }}>空地图</Tag>
@@ -339,8 +354,11 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
       key: 'alignment',
       width: 170,
       render: (_, record) => {
-        if (!record.has_pcd) {
-          return <Tag color="default" style={{ fontSize: 13, padding: '4px 10px' }}>无点云</Tag>
+        if (!hasGpsConfig(record)) {
+          return <Tag color="default" style={{ fontSize: 13, padding: '4px 10px' }}>需 GPS 地图</Tag>
+        }
+        if (!hasPcd(record)) {
+          return <Tag color="blue" style={{ fontSize: 13, padding: '4px 10px' }}>待建图</Tag>
         }
         if (!record.has_alignment) {
           return <Tag color="orange" style={{ fontSize: 13, padding: '4px 10px' }}>未对齐</Tag>
@@ -386,7 +404,7 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
             onClick={() => handlePreview(record)}
             style={touchButtonStyle}
             title="预览"
-            disabled={!record.has_pcd && !record.has_gps_config}
+            disabled={!hasPcd(record) && !hasGpsConfig(record)}
           />
           {/* 建图 */}
           <Button
@@ -394,7 +412,8 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
             icon={<PlayCircleOutlined />}
             onClick={() => handleStartMapping(record)}
             style={touchButtonStyle}
-            title="建图"
+            title={canStartGpsMapping(record) ? '在 GPS 地图中建图' : '请先创建 GPS 地图'}
+            disabled={!canStartGpsMapping(record)}
           />
           {/* 雷达定位 */}
           <Button
@@ -403,7 +422,7 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
             onClick={() => handleLidarLocalization(record)}
             style={touchButtonStyle}
             title="雷达定位"
-            disabled={!record.has_pcd}
+            disabled={!hasPcd(record)}
           />
           {/* 规划 */}
           <Button
@@ -419,8 +438,8 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
             icon={<AimOutlined />}
             onClick={() => handleAlignment(record)}
             style={touchButtonStyle}
-            title="坐标对齐"
-            disabled={!record.has_pcd}
+            title={canAlignMap(record) ? '坐标对齐' : '需 GPS 地图且已保存雷达点云'}
+            disabled={!canAlignMap(record)}
           />
           {/* 编辑（重命名） */}
           <Button
@@ -454,9 +473,9 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
   // 统计信息
   const totalSize = maps.reduce((sum, m) => sum + m.total_size, 0)
   const totalFiles = maps.reduce((sum, m) => sum + m.file_count, 0)
-  const pcdMaps = maps.filter((m) => m.has_pcd).length
-  const gpsMaps = maps.filter((m) => m.has_gps_config && !m.has_pcd).length
-  const emptyMaps = maps.filter((m) => !m.has_pcd && !m.has_gps_config).length
+  const pcdMaps = maps.filter((m) => hasPcd(m)).length
+  const gpsMaps = maps.filter((m) => hasGpsConfig(m) && !hasPcd(m)).length
+  const emptyMaps = maps.filter((m) => !hasPcd(m) && !hasGpsConfig(m)).length
 
   return (
     <div>

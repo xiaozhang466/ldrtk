@@ -6,7 +6,7 @@
  * 内部处理经纬度 → 世界坐标的转换
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Space, Button, Slider } from 'antd'
 import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons'
 import FusionMapForManager from './FusionMapForManager'
@@ -29,18 +29,54 @@ interface FusionMapViewProps {
   mode?: 'preview' | 'planning'
   pathPoints?: PathPoint[]
   onPathPointsChange?: (points: PathPoint[]) => void
+  robotPosition?: {
+    lat?: number
+    lng?: number
+    alt?: number
+    x?: number
+    y?: number
+    z?: number
+    heading?: number
+  }
 }
+
+const EMPTY_PATH_POINTS: PathPoint[] = []
 
 const FusionMapView: React.FC<FusionMapViewProps> = ({
   mapInfo,
   mode = 'preview',
-  pathPoints = [],
+  pathPoints = EMPTY_PATH_POINTS,
   onPathPointsChange,
+  robotPosition,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [overlayOpacity, setOverlayOpacity] = useState(0.7)
   const viewerRef = useRef<any>(null)
   const pathEntitiesRef = useRef<any[]>([])
+  const vehicleEntityRef = useRef<any>(null)
+
+  const hasGeoreferencedPcdOverlay = useMemo(() => {
+    const files = Array.isArray(mapInfo?.files) ? mapInfo.files : []
+    const hasMapImage = files.some((file: any) => file?.name === 'map.png' || file?.path === 'map.png')
+    const bounds = mapInfo?.local_bounds || mapInfo?.gps_bounds || mapInfo?.geo_bounds
+    const west = Number(bounds?.west)
+    const south = Number(bounds?.south)
+    const east = Number(bounds?.east)
+    const north = Number(bounds?.north)
+    return Boolean(
+      hasMapImage &&
+      Number.isFinite(west) &&
+      Number.isFinite(south) &&
+      Number.isFinite(east) &&
+      Number.isFinite(north) &&
+      west >= -180 &&
+      east <= 180 &&
+      south >= -90 &&
+      north <= 90 &&
+      east > west &&
+      north > south
+    )
+  }, [mapInfo?.files, mapInfo?.local_bounds, mapInfo?.gps_bounds, mapInfo?.geo_bounds])
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -231,12 +267,108 @@ const FusionMapView: React.FC<FusionMapViewProps> = ({
     }
   }, [pathPoints, worldToLatLng])
 
+  // 渲染当前位置车辆标记
+  useEffect(() => {
+    if (!viewerRef.current || viewerRef.current.isDestroyed()) return
+
+    const viewer = viewerRef.current
+    let position: { lat: number; lng: number; alt: number } | null = null
+
+    if (
+      robotPosition?.lat !== undefined &&
+      robotPosition?.lng !== undefined &&
+      Number.isFinite(robotPosition.lat) &&
+      Number.isFinite(robotPosition.lng) &&
+      !(robotPosition.lat === 0 && robotPosition.lng === 0)
+    ) {
+      position = {
+        lat: robotPosition.lat,
+        lng: robotPosition.lng,
+        alt: robotPosition.alt || 0,
+      }
+    } else if (
+      robotPosition?.x !== undefined &&
+      robotPosition?.y !== undefined &&
+      Number.isFinite(robotPosition.x) &&
+      Number.isFinite(robotPosition.y)
+    ) {
+      position = worldToLatLng(robotPosition.x, robotPosition.y, robotPosition.z || 0)
+    }
+
+    if (!position) {
+      if (vehicleEntityRef.current) {
+        viewer.entities.remove(vehicleEntityRef.current)
+        vehicleEntityRef.current = null
+      }
+      return
+    }
+
+    const cartesian = Cesium.Cartesian3.fromDegrees(position.lng, position.lat, position.alt)
+    const rotation = -((robotPosition?.heading || 0) * Math.PI / 180)
+
+    if (vehicleEntityRef.current) {
+      vehicleEntityRef.current.position = cartesian
+      if (vehicleEntityRef.current.billboard) {
+        vehicleEntityRef.current.billboard.rotation = rotation
+      }
+      return
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = 32
+    canvas.height = 32
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.fillStyle = '#ff4d4f'
+      ctx.beginPath()
+      ctx.moveTo(16, 2)
+      ctx.lineTo(28, 28)
+      ctx.lineTo(16, 20)
+      ctx.lineTo(4, 28)
+      ctx.closePath()
+      ctx.fill()
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+      ctx.fillStyle = '#ffffff'
+      ctx.beginPath()
+      ctx.arc(16, 16, 3, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    vehicleEntityRef.current = viewer.entities.add({
+      position: cartesian,
+      billboard: {
+        image: canvas.toDataURL(),
+        width: 40,
+        height: 40,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        rotation,
+      },
+      label: {
+        text: '当前位置',
+        font: '12pt sans-serif',
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        outlineWidth: 2,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -42),
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+      },
+    })
+  }, [robotPosition, worldToLatLng])
+
   // 清理实体
   useEffect(() => {
     return () => {
       if (viewerRef.current && !viewerRef.current.isDestroyed()) {
         pathEntitiesRef.current.forEach(entity => viewerRef.current.entities.remove(entity))
         pathEntitiesRef.current = []
+        if (vehicleEntityRef.current) {
+          viewerRef.current.entities.remove(vehicleEntityRef.current)
+          vehicleEntityRef.current = null
+        }
         viewerRef.current.entities.removeAll()
       }
     }
@@ -285,15 +417,19 @@ const FusionMapView: React.FC<FusionMapViewProps> = ({
           </span>
         </Space>
         <Space size={8}>
-          <span style={{ fontSize: 11, color: '#999' }}>PCD 透明度</span>
-          <Slider
-            value={overlayOpacity}
-            onChange={setOverlayOpacity}
-            min={0}
-            max={1}
-            step={0.1}
-            style={{ width: 100 }}
-          />
+          {hasGeoreferencedPcdOverlay && (
+            <>
+              <span style={{ fontSize: 11, color: '#999' }}>PCD 透明度</span>
+              <Slider
+                value={overlayOpacity}
+                onChange={setOverlayOpacity}
+                min={0}
+                max={1}
+                step={0.1}
+                style={{ width: 100 }}
+              />
+            </>
+          )}
           <Button
             type="primary"
             size="small"
@@ -309,6 +445,7 @@ const FusionMapView: React.FC<FusionMapViewProps> = ({
         <FusionMapForManager
           mapInfo={mapInfo}
           overlayOpacity={overlayOpacity}
+          showPcdOverlay={hasGeoreferencedPcdOverlay}
           mode={mode}
           onViewerReady={handleViewerReady}
           onMapClick={handleMapClick}
@@ -322,7 +459,8 @@ const FusionMapView: React.FC<FusionMapViewProps> = ({
         fontSize: 11,
         color: '#999',
       }}>
-        🖱️ 左键旋转 | Ctrl+ 左键平移 | 滚轮缩放 | 滑块调节 PCD 透明度
+        鼠标拖动平移 | 滚轮缩放
+        {hasGeoreferencedPcdOverlay && ' | 滑块调节 PCD 透明度'}
         {mode === 'planning' && ' | 点击地图添加路径点（世界坐标）'}
       </div>
     </div>

@@ -16,22 +16,22 @@ control:
   fixed_quality_value: 4
 
 tracking:
-  lookahead_distance: 0.8
+  lookahead_distance: 1.0
   waypoint_tolerance: 0.5
   goal_tolerance: 0.35
-  max_linear_speed: 0.2
-  max_angular_speed: 0.35
-  min_linear_speed: 0.04
-  slowdown_distance: 1.2
+  max_linear_speed: 0.5
+  max_angular_speed: 0.6
+  min_linear_speed: 0.06
+  slowdown_distance: 1.8
   rotate_in_place_threshold: 0.85
-  yaw_align_speed: 0.25
-  turn_slowdown_angular: 0.25
+  yaw_align_speed: 0.35
+  turn_slowdown_angular: 0.45
   allow_reverse: false
 
 smoothing:
   enabled: true
-  linear_acceleration: 0.12
-  angular_acceleration: 0.25
+  linear_acceleration: 0.25
+  angular_acceleration: 0.45
 
 goal:
   enforce_goal_yaw: false

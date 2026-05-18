@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Card, Button, Input, Space, message, Divider, Tooltip, Badge } from 'antd'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { Button, Input, Space, message, Divider, Tooltip, Badge } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, SaveOutlined, ReloadOutlined,
   UndoOutlined, RedoOutlined, EditOutlined, CheckOutlined, CloseOutlined,
@@ -12,6 +12,7 @@ import SimpleMapCanvas from './SimpleMapCanvas'
 import LocalMapView from './LocalMapView'
 import GPSMapView from './GPSMapView'
 import FusionMapView from './FusionMapView'
+import { useRos } from '../hooks/useRos'
 
 interface PathPlanningProps {
   mapName?: string
@@ -27,7 +28,41 @@ interface HistoryState {
   selectedPointId: string | null
 }
 
+interface CurrentPosition {
+  source: 'gps' | 'odom' | 'lidar_odom'
+  sourceTopic: string
+  label: string
+  lat?: number
+  lng?: number
+  alt?: number
+  x?: number
+  y?: number
+  z?: number
+  heading?: number
+  updatedAt: number
+}
+
+const toFiniteNumber = (value: unknown): number | null => {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+const normalizeDegrees = (degrees: number) => ((degrees % 360) + 360) % 360
+
+const yawFromQuaternion = (orientation: any): number | undefined => {
+  if (!orientation) return undefined
+  const x = Number(orientation.x || 0)
+  const y = Number(orientation.y || 0)
+  const z = Number(orientation.z || 0)
+  const w = Number(orientation.w || 1)
+  return Math.atan2(
+    2 * (w * z + x * y),
+    1 - 2 * (y * y + z * z)
+  ) * 180 / Math.PI
+}
+
 const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => {
+  const { ros, connected: rosConnected } = useRos()
   const [maps, setMaps] = useState<{ value: string; label: string }[]>([])
   const [selectedMap, setSelectedMap] = useState<string>(mapName || '')
   const [mapConfig, setMapConfig] = useState<MapConfig | null>(null)
@@ -52,11 +87,79 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
   // 重命名
   const [renamingPathId, setRenamingPathId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [gpsPosition, setGpsPosition] = useState<CurrentPosition | null>(null)
+  const [odomPosition, setOdomPosition] = useState<CurrentPosition | null>(null)
+  const [lidarOdomPosition, setLidarOdomPosition] = useState<CurrentPosition | null>(null)
 
   const mapImageUrl = selectedMap ? `/api/maps/${selectedMap}/map.png` : ''
 
   // 选中路径对象
   const selectedPath = paths.find(p => p.id === selectedPathId) || null
+
+  const gpsOrigin = useMemo(() => {
+    const origin = mapConfig?.gps_origin
+    if (!origin) return null
+
+    const lat = toFiniteNumber(origin.lat)
+    const lng = toFiniteNumber(origin.lng ?? origin.lon)
+    const alt = toFiniteNumber(origin.alt) ?? 0
+
+    if (lat === null || lng === null) return null
+    return { lat, lng, alt }
+  }, [mapConfig])
+
+  const latLngToWorld = useCallback((lat: number, lng: number, alt: number = 0) => {
+    if (!gpsOrigin) return null
+
+    const a = 6378137.0
+    const e2 = 0.00669437999014
+    const originLatRad = gpsOrigin.lat * Math.PI / 180
+    const mPerDegLat = (Math.PI / 180) * (a * (1 - e2)) / Math.pow(1 - e2 * Math.sin(originLatRad) ** 2, 1.5)
+    const mPerDegLng = (Math.PI / 180) * (a * Math.cos(originLatRad)) / Math.sqrt(1 - e2 * Math.sin(originLatRad) ** 2)
+
+    return {
+      x: (lng - gpsOrigin.lng) * mPerDegLng,
+      y: (lat - gpsOrigin.lat) * mPerDegLat,
+      z: alt - gpsOrigin.alt,
+    }
+  }, [gpsOrigin])
+
+  const activePosition = useMemo<CurrentPosition | null>(() => {
+    if (mapType === 'gps') {
+      return gpsPosition?.lat !== undefined && gpsPosition?.lng !== undefined ? gpsPosition : null
+    }
+
+    if (mapType === 'fusion') {
+      if (gpsPosition?.lat !== undefined && gpsPosition?.lng !== undefined) {
+        const world = latLngToWorld(gpsPosition.lat, gpsPosition.lng, gpsPosition.alt || 0)
+        if (world) {
+          return {
+            ...gpsPosition,
+            ...world,
+            label: 'RTK/GPS',
+          }
+        }
+      }
+      return lidarOdomPosition || odomPosition
+    }
+
+    return lidarOdomPosition || odomPosition
+  }, [mapType, gpsPosition, lidarOdomPosition, odomPosition, latLngToWorld])
+
+  const currentPositionText = useMemo(() => {
+    if (!rosConnected) return 'ROS 未连接'
+    if (!activePosition) return '等待当前位置'
+
+    if (activePosition.lat !== undefined && activePosition.lng !== undefined) {
+      return `${activePosition.label}: ${activePosition.lat.toFixed(7)}, ${activePosition.lng.toFixed(7)}`
+    }
+
+    if (activePosition.x !== undefined && activePosition.y !== undefined) {
+      return `${activePosition.label}: X ${activePosition.x.toFixed(3)}, Y ${activePosition.y.toFixed(3)}`
+    }
+
+    return '等待当前位置'
+  }, [rosConnected, activePosition])
 
   // 推送历史
   const pushHistory = useCallback((pathsCopy: PathItem[], selPathId: string | null, selPtId: string | null) => {
@@ -124,6 +227,81 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
       console.error('加载地图配置失败:', e)
     }
   }
+
+  // 订阅当前位置：GPS/RTK 用于 GPS 地图，本地里程计用于 local/fusion 地图
+  useEffect(() => {
+    if (!rosConnected) return
+
+    const handleGpsFix = (sourceTopic: string, label: string) => (msg: any) => {
+      const lat = toFiniteNumber(msg?.latitude)
+      const lng = toFiniteNumber(msg?.longitude)
+      const alt = toFiniteNumber(msg?.altitude) ?? 0
+      if (lat === null || lng === null) return
+
+      setGpsPosition(prev => ({
+        source: 'gps',
+        sourceTopic,
+        label,
+        lat,
+        lng,
+        alt,
+        heading: prev?.heading,
+        updatedAt: Date.now(),
+      }))
+    }
+
+    const handleGpsHeading = (msg: any) => {
+      const headingRad = toFiniteNumber(msg?.twist?.twist?.angular?.z)
+      if (headingRad === null) return
+      const heading = normalizeDegrees(headingRad * 180 / Math.PI)
+
+      setGpsPosition(prev => prev ? {
+        ...prev,
+        heading,
+        updatedAt: Date.now(),
+      } : prev)
+    }
+
+    const handleOdometry = (sourceTopic: string, label: string, source: 'odom' | 'lidar_odom') => (msg: any) => {
+      const pose = msg?.pose?.pose
+      const x = toFiniteNumber(pose?.position?.x)
+      const y = toFiniteNumber(pose?.position?.y)
+      const z = toFiniteNumber(pose?.position?.z) ?? 0
+      if (x === null || y === null) return
+
+      const next: CurrentPosition = {
+        source,
+        sourceTopic,
+        label,
+        x,
+        y,
+        z,
+        heading: yawFromQuaternion(pose?.orientation),
+        updatedAt: Date.now(),
+      }
+
+      if (source === 'lidar_odom') {
+        setLidarOdomPosition(next)
+      } else {
+        setOdomPosition(next)
+      }
+    }
+
+    const unsubs = [
+      ros.subscribe('/gps/fix', handleGpsFix('/gps/fix', 'GPS'), 'sensor_msgs/NavSatFix'),
+      ros.subscribe('/rtk/fix', handleGpsFix('/rtk/fix', 'RTK'), 'sensor_msgs/NavSatFix'),
+      ros.subscribe('/gps/heading', handleGpsHeading, 'geometry_msgs/TwistWithCovarianceStamped'),
+      ros.subscribe('/rtk/heading', handleGpsHeading, 'geometry_msgs/TwistWithCovarianceStamped'),
+      ros.subscribe('/odom', handleOdometry('/odom', '里程计', 'odom'), 'nav_msgs/Odometry'),
+      ros.subscribe('/Odometry', handleOdometry('/Odometry', '雷达定位', 'lidar_odom'), 'nav_msgs/Odometry'),
+    ]
+
+    return () => {
+      unsubs.forEach(unsub => {
+        if (unsub) unsub()
+      })
+    }
+  }, [ros, rosConnected])
 
   // 保存路径
   const handleSave = async () => {
@@ -209,20 +387,114 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
     setSelectedPointId(nextState.selectedPointId)
   }
 
-  // 地图点击添加点 - 默认类型为途径点
-  const handleMapPointClick = useCallback((worldCoord: WorldCoord) => {
-    if (!selectedPathId) {
-      message.warning('请先选择或新建路径')
+  const appendPointToPath = useCallback((newPoint: PathPoint, autoCreatePath = false) => {
+    const targetPath = selectedPathId ? paths.find(p => p.id === selectedPathId) : null
+
+    if (!targetPath) {
+      if (!autoCreatePath) {
+        message.warning('请先选择或新建路径')
+        return false
+      }
+
+      pushHistory(paths, selectedPathId, selectedPointId)
+      const pathId = `path-${Date.now()}`
+      const newPath: PathItem = {
+        id: pathId,
+        name: `路径${paths.length + 1}`,
+        points: [newPoint],
+      }
+      setPaths(prev => [...prev, newPath])
+      setSelectedPathId(pathId)
+      setSelectedPointId(newPoint.id)
+      return true
+    }
+
+    pushHistory(paths, selectedPathId, selectedPointId)
+    setPaths(prev => prev.map(p =>
+      p.id === targetPath.id ? { ...p, points: [...p.points, newPoint] } : p
+    ))
+    setSelectedPointId(newPoint.id)
+    return true
+  }, [paths, selectedPathId, selectedPointId, pushHistory])
+
+  const buildPointFromCurrentPosition = useCallback((): PathPoint | null => {
+    if (!activePosition) return null
+
+    const pointId = `wp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const waypointType: WaypointType = 'waypoint'
+
+    if (mapType === 'gps') {
+      if (activePosition.lat === undefined || activePosition.lng === undefined) return null
+      const world = latLngToWorld(activePosition.lat, activePosition.lng, activePosition.alt || 0)
+
+      return {
+        id: pointId,
+        lat: activePosition.lat,
+        lng: activePosition.lng,
+        alt: activePosition.alt || 0,
+        x: world?.x ?? 0,
+        y: world?.y ?? 0,
+        z: world?.z ?? 0,
+        waypointType,
+      }
+    }
+
+    if (mapType === 'fusion') {
+      let x = activePosition.x
+      let y = activePosition.y
+      let z = activePosition.z || 0
+
+      if ((x === undefined || y === undefined) && activePosition.lat !== undefined && activePosition.lng !== undefined) {
+        const world = latLngToWorld(activePosition.lat, activePosition.lng, activePosition.alt || 0)
+        x = world?.x
+        y = world?.y
+        z = world?.z ?? z
+      }
+
+      if (x === undefined || y === undefined) return null
+
+      return {
+        id: pointId,
+        x,
+        y,
+        z,
+        lat: activePosition.lat,
+        lng: activePosition.lng,
+        alt: activePosition.alt,
+        waypointType,
+      }
+    }
+
+    if (activePosition.x === undefined || activePosition.y === undefined) return null
+
+    return {
+      id: pointId,
+      x: activePosition.x,
+      y: activePosition.y,
+      z: activePosition.z || 0,
+      waypointType,
+    }
+  }, [activePosition, mapType, latLngToWorld])
+
+  const handleAddCurrentPosition = useCallback(() => {
+    const newPoint = buildPointFromCurrentPosition()
+    if (!newPoint) {
+      message.warning(rosConnected ? '还没有可用的当前位置' : 'ROS 未连接，无法获取当前位置')
       return
     }
-    pushHistory(paths, selectedPathId, selectedPointId)
+
+    const added = appendPointToPath(newPoint, true)
+    if (added) {
+      message.success(selectedPathId ? '已添加当前位置为路径点' : '已新建路径并添加当前位置')
+    }
+  }, [appendPointToPath, buildPointFromCurrentPosition, rosConnected, selectedPathId])
+
+  // 地图点击添加点 - 默认类型为途径点
+  const handleMapPointClick = useCallback((worldCoord: WorldCoord) => {
     const ptId = `wp-${Date.now()}`
     const newPt: PathPoint = { id: ptId, x: worldCoord.x, y: worldCoord.y, z: worldCoord.z, waypointType: 'waypoint' }
-    setPaths(prev => prev.map(p =>
-      p.id === selectedPathId ? { ...p, points: [...p.points, newPt] } : p
-    ))
-    setSelectedPointId(ptId)
-  }, [selectedPathId, selectedPointId, paths, pushHistory])
+    appendPointToPath(newPt, false)
+  }, [appendPointToPath])
 
   // 标记拖拽
   const handleMarkerMove = useCallback((id: string, worldCoord: WorldCoord) => {
@@ -315,16 +587,23 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
   }) || []
 
   // 将路径点转换为 GPS 坐标格式（用于 GPSMapView）
-  const gpsPathPoints = selectedPath?.points.map(pt => ({
-    id: pt.id,
-    lat: pt.lat ?? 0,
-    lng: pt.lng ?? 0,
-    alt: pt.alt,
-    x: pt.x,
-    y: pt.y,
-    z: pt.z,
-    waypointType: pt.waypointType,
-  })).filter(pt => pt.lat !== undefined && pt.lng !== undefined) || []
+  const gpsPathPoints = selectedPath?.points
+    .map(pt => {
+      const lat = pt.lat ?? pt._orig_lat
+      const lng = pt.lng ?? pt._orig_lng
+      if (lat === undefined || lng === undefined) return null
+      return {
+        id: pt.id,
+        lat,
+        lng,
+        alt: pt.alt,
+        x: pt.x,
+        y: pt.y,
+        z: pt.z,
+        waypointType: pt.waypointType,
+      }
+    })
+    .filter((pt): pt is NonNullable<typeof pt> => pt !== null) || []
 
   // 将路径点转换为融合地图坐标格式（世界坐标，用于 FusionMapView）
   const fusionPathPoints = selectedPath?.points.map(pt => ({
@@ -393,6 +672,39 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
   // 选中的点
   const selectedPoint = selectedPath?.points.find(p => p.id === selectedPointId) || null
 
+  const robotPositionForMap = useMemo(() => {
+    if (!activePosition) return undefined
+
+    if (mapType === 'gps') {
+      if (activePosition.lat === undefined || activePosition.lng === undefined) return undefined
+      return {
+        lat: activePosition.lat,
+        lng: activePosition.lng,
+        alt: activePosition.alt,
+        heading: activePosition.heading,
+      }
+    }
+
+    if (mapType === 'fusion') {
+      return {
+        lat: activePosition.lat,
+        lng: activePosition.lng,
+        alt: activePosition.alt,
+        x: activePosition.x,
+        y: activePosition.y,
+        z: activePosition.z,
+        heading: activePosition.heading,
+      }
+    }
+
+    if (activePosition.x === undefined || activePosition.y === undefined) return undefined
+    return {
+      x: activePosition.x,
+      y: activePosition.y,
+      heading: activePosition.heading,
+    }
+  }, [activePosition, mapType])
+
   // 点坐标判断
   const getPointTypeLabel = (path: PathItem, ptId: string) => {
     const idx = path.points.findIndex(p => p.id === ptId)
@@ -416,6 +728,7 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
             mapImageUrl={mapImageUrl}
             markers={canvasMarkers}
             mapConfig={mapConfig}
+            robotPosition={robotPositionForMap as { x: number; y: number; heading?: number } | undefined}
             onMapClick={handleMapPointClick}
             onMarkerDrag={handleMarkerMove}
           />
@@ -425,6 +738,7 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
             mode="planning"
             pathPoints={gpsPathPoints}
             onPathPointsChange={handleGpsPathPointsChange}
+            robotPosition={robotPositionForMap}
           />
         ) : mapType === 'fusion' ? (
           <FusionMapView
@@ -432,6 +746,7 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
             mode="planning"
             pathPoints={fusionPathPoints}
             onPathPointsChange={handleFusionPathPointsChange}
+            robotPosition={robotPositionForMap}
           />
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: '#001529', color: '#fff' }}>
@@ -454,6 +769,44 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
             <Tooltip title="保存"><Button size="small" type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={loading} /></Tooltip>
             <Tooltip title="刷新"><Button size="small" icon={<ReloadOutlined />} onClick={() => selectedMap && loadPaths(selectedMap)} /></Tooltip>
           </Space>
+
+          <Divider style={{ margin: '8px 0', borderColor: '#333' }} />
+          <div style={{
+            padding: '8px 8px 10px',
+            borderRadius: 6,
+            background: 'rgba(255,255,255,0.06)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Badge
+                status={activePosition ? 'success' : 'warning'}
+                text={<span style={{ color: '#fff', fontSize: 12 }}>当前位置</span>}
+              />
+              <span style={{ color: '#8c8c8c', fontSize: 11 }}>{activePosition?.sourceTopic || '--'}</span>
+            </div>
+            <div style={{
+              color: activePosition ? '#d9f7be' : '#aaa',
+              fontSize: 11,
+              lineHeight: 1.45,
+              minHeight: 32,
+              wordBreak: 'break-all',
+            }}>
+              {currentPositionText}
+              {activePosition?.heading !== undefined && (
+                <div>航向: {activePosition.heading.toFixed(1)}°</div>
+              )}
+            </div>
+            <Button
+              block
+              size="small"
+              type="primary"
+              icon={<AimOutlined />}
+              onClick={handleAddCurrentPosition}
+              disabled={!activePosition || !rosConnected}
+              style={{ marginTop: 8 }}
+            >
+              当前位置打点
+            </Button>
+          </div>
 
           {/* 路径操作列表 */}
           <Divider style={{ margin: '8px 0', borderColor: '#333' }} />
@@ -623,6 +976,7 @@ const PathPlanning: React.FC<PathPlanningProps> = ({ mapName, onMapChange }) => 
         <span>路径: <strong style={{ color: '#fff' }}>{paths.length}</strong> 条</span>
         <span>选中路径: <strong style={{ color: '#fff' }}>{selectedPath?.name || '无'}</strong></span>
         <span>路径点数: <strong style={{ color: '#fff' }}>{selectedPath?.points.length || 0}</strong></span>
+        <span>当前位置: <strong style={{ color: activePosition ? '#d9f7be' : '#fff' }}>{currentPositionText}</strong></span>
         <span>选中点: <strong style={{ color: '#fff' }}>{selectedPointId && selectedPoint ? `${getPointTypeLabel(selectedPath!, selectedPointId)} (${selectedPoint.lat !== undefined && selectedPoint.lng !== undefined ? `${selectedPoint.lat.toFixed(6)}, ${selectedPoint.lng.toFixed(6)}` : `${(selectedPoint.x ?? 0).toFixed(2)}, ${(selectedPoint.y ?? 0).toFixed(2)}`})` : '无'}</strong></span>
       </div>
     </div>

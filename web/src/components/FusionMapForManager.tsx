@@ -3,7 +3,7 @@
  * Cesium 天地图 + PCD 栅格化叠加
  */
 
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { TIANDITU_PROXY } from '../config'
@@ -12,14 +12,63 @@ import { API_BASE } from '../config'
 interface FusionMapForManagerProps {
   mapInfo: any
   overlayOpacity?: number
+  showPcdOverlay?: boolean
   mode?: 'preview' | 'planning'
   onViewerReady?: (viewer: any) => void
   onMapClick?: (position: { lat: number; lng: number; alt: number }) => void
 }
 
+const toNumber = (value: unknown): number | null => {
+  const parsed = typeof value === 'string' ? parseFloat(value) : Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const getGpsOrigin = (mapInfo: any) => {
+  const origin = mapInfo?.gps_origin
+  if (!origin) return null
+  const lat = toNumber(origin.lat ?? origin.latitude)
+  const lng = toNumber(origin.lng ?? origin.lon ?? origin.longitude)
+  const alt = toNumber(origin.alt ?? origin.altitude) ?? 0
+  if (lat === null || lng === null) return null
+  return { lat, lng, alt }
+}
+
+const getPcdOverlayRectangle = (mapInfo: any) => {
+  const files = Array.isArray(mapInfo?.files) ? mapInfo.files : []
+  const hasMapImage = files.some((file: any) => file?.name === 'map.png' || file?.path === 'map.png')
+  const bounds = mapInfo?.local_bounds || mapInfo?.gps_bounds || mapInfo?.geo_bounds
+  if (!hasMapImage || !bounds) return null
+
+  const west = toNumber(bounds.west)
+  const south = toNumber(bounds.south)
+  const east = toNumber(bounds.east)
+  const north = toNumber(bounds.north)
+  if ([west, south, east, north].some((value) => value === null)) return null
+  if (!(west! >= -180 && east! <= 180 && south! >= -90 && north! <= 90)) return null
+  if (!(east! > west! && north! > south!)) return null
+  return Cesium.Rectangle.fromDegrees(west!, south!, east!, north!)
+}
+
+const getPcdOverlayKey = (mapInfo: any, showPcdOverlay: boolean) => {
+  if (!showPcdOverlay) return 'off'
+  const files = Array.isArray(mapInfo?.files) ? mapInfo.files : []
+  const hasMapImage = files.some((file: any) => file?.name === 'map.png' || file?.path === 'map.png')
+  const bounds = mapInfo?.local_bounds || mapInfo?.gps_bounds || mapInfo?.geo_bounds
+  if (!hasMapImage || !bounds) return 'none'
+
+  const west = toNumber(bounds.west)
+  const south = toNumber(bounds.south)
+  const east = toNumber(bounds.east)
+  const north = toNumber(bounds.north)
+  return [west, south, east, north].every((value) => value !== null)
+    ? `${west},${south},${east},${north}`
+    : 'none'
+}
+
 const FusionMapForManager: React.FC<FusionMapForManagerProps> = ({
   mapInfo,
   overlayOpacity = 0.7,
+  showPcdOverlay = true,
   mode = 'preview',
   onViewerReady,
   onMapClick,
@@ -28,6 +77,22 @@ const FusionMapForManager: React.FC<FusionMapForManagerProps> = ({
   const viewerRef = useRef(null)
   const initializedRef = useRef(false)
   const pcdLayerRef = useRef(null)
+  const onViewerReadyRef = useRef(onViewerReady)
+  const onMapClickRef = useRef(onMapClick)
+  const gpsOrigin = getGpsOrigin(mapInfo)
+  const gpsOriginKey = gpsOrigin ? `${gpsOrigin.lat},${gpsOrigin.lng},${gpsOrigin.alt}` : 'none'
+  const pcdOverlayKey = useMemo(
+    () => getPcdOverlayKey(mapInfo, showPcdOverlay),
+    [mapInfo?.files, mapInfo?.local_bounds, mapInfo?.gps_bounds, mapInfo?.geo_bounds, showPcdOverlay]
+  )
+
+  useEffect(() => {
+    onViewerReadyRef.current = onViewerReady
+  }, [onViewerReady])
+
+  useEffect(() => {
+    onMapClickRef.current = onMapClick
+  }, [onMapClick])
 
   useEffect(() => {
     if (initializedRef.current) return
@@ -98,18 +163,15 @@ const FusionMapForManager: React.FC<FusionMapForManagerProps> = ({
       viewer.imageryLayers.addImageryProvider(ciaProvider)
 
       // 添加 PCD 栅格化图层（map.png）
-      if (mapInfo.path) {
-        const pcdUrl = `${API_BASE.replace('/api', '')}${mapInfo.path}/map.png`
+      const pcdRectangle = showPcdOverlay ? getPcdOverlayRectangle(mapInfo) : null
+      if (pcdRectangle && mapInfo.name) {
+        const pcdUrl = `${API_BASE}/maps/${encodeURIComponent(mapInfo.name)}/map.png`
         const pcdProvider = new Cesium.SingleTileImageryProvider({
           url: pcdUrl,
-          rectangle: Cesium.Rectangle.fromDegrees(
-            mapInfo.local_bounds?.west || 0,
-            mapInfo.local_bounds?.south || 0,
-            mapInfo.local_bounds?.east || 0,
-            mapInfo.local_bounds?.north || 0,
-          ),
+          rectangle: pcdRectangle,
         })
         pcdLayerRef.current = viewer.imageryLayers.addImageryProvider(pcdProvider)
+        pcdLayerRef.current.alpha = overlayOpacity
       }
 
       // 优化性能
@@ -123,17 +185,18 @@ const FusionMapForManager: React.FC<FusionMapForManagerProps> = ({
       scene.highDynamicRange = false
 
       // 定位到地图中心
-      if (mapInfo.gps_origin) {
-        const { lat, lng } = mapInfo.gps_origin
+      if (gpsOrigin) {
         viewer.camera.setView({
-          destination: Cesium.Cartesian3.fromDegrees(lng, lat, 3000),
+          destination: Cesium.Cartesian3.fromDegrees(gpsOrigin.lng, gpsOrigin.lat, 1200),
           orientation: {
             heading: 0,
-            pitch: Cesium.Math.toRadians(-45),
+            pitch: Cesium.Math.toRadians(-90),
             roll: 0,
           },
         })
       }
+
+      onViewerReadyRef.current?.(viewer)
 
       // 规划模式下启用点击事件
       if (mode === 'planning' && onMapClick) {
@@ -146,7 +209,7 @@ const FusionMapForManager: React.FC<FusionMapForManagerProps> = ({
           const lat = Cesium.Math.toDegrees(cartographic.latitude)
           const lng = Cesium.Math.toDegrees(cartographic.longitude)
           const alt = cartographic.height
-          onMapClick({ lat, lng, alt })
+          onMapClickRef.current?.({ lat, lng, alt })
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
       }
 
@@ -169,7 +232,13 @@ const FusionMapForManager: React.FC<FusionMapForManagerProps> = ({
       }
       initializedRef.current = false
     }
-  }, [mapInfo.path, mapInfo.gps_origin?.lat, mapInfo.gps_origin?.lng, mode, onViewerReady, onMapClick])
+  }, [mapInfo?.name, gpsOriginKey, pcdOverlayKey, showPcdOverlay, mode])
+
+  useEffect(() => {
+    if (pcdLayerRef.current) {
+      pcdLayerRef.current.alpha = overlayOpacity
+    }
+  }, [overlayOpacity])
 
   return (
     <div

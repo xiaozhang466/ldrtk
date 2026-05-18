@@ -133,6 +133,7 @@ class FrameAlignmentCalibrator:
         self.rtk_odom_topic = rospy.get_param("~topics/rtk_odom", "/odometry/rtk")
         self.lidar_odom_topic = rospy.get_param("~topics/lidar_odom", "/Odometry")
         self.rtk_quality_topic = rospy.get_param("~topics/rtk_quality", "/rtk/fix_quality")
+        self.output_odom_topic = rospy.get_param("~topics/lidar_in_rtk_odom", "/odometry/lidar_in_rtk")
         self.status_topic = rospy.get_param("~topics/status", "/nav_fusion/alignment_status")
 
         self.parent_frame = rospy.get_param("~frames/parent", "map")
@@ -270,6 +271,12 @@ class FrameAlignmentCalibrator:
         payload = {
             "parent_frame": self.parent_frame,
             "child_frame": self.child_frame,
+            "coordinate_system": {
+                "type": "utm",
+                "frame_id": self.parent_frame,
+                "source_topic": self.rtk_odom_topic,
+                "output_topic": self.output_odom_topic,
+            },
             "translation": {
                 "x": tx,
                 "y": ty,
@@ -287,6 +294,9 @@ class FrameAlignmentCalibrator:
                 "spatial_spread_m": spread,
                 "yaw_check_error_deg": math.degrees(yaw_check),
                 "yaw_span_deg": math.degrees(span),
+                "target": "lidar_odometry_to_rtk_utm",
+                "rtk_odom_topic": self.rtk_odom_topic,
+                "lidar_odom_topic": self.lidar_odom_topic,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
         }
