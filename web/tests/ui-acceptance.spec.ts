@@ -13,8 +13,8 @@ test.describe('耘小智 01 UI 验收测试', () => {
     await expect(page.locator('body')).toBeVisible();
   });
 
-  test('GPS 地图创建页面应该正常加载', async ({ page }) => {
-    await page.goto('http://192.168.3.121:3000/#/gps-map-create');
+  test('路径规划页面应该正常加载', async ({ page }) => {
+    await page.goto('http://192.168.3.121:3000/#/path-planning');
     await page.waitForLoadState('networkidle');
     await expect(page.locator('body')).toBeVisible();
   });

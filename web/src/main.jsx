@@ -10,7 +10,6 @@ import MapManagementPage from './pages/MapManagementPage'
 import Login from './pages/Login'
 import AuthGuard from './components/AuthGuard'
 import PathPlanningPage from './pages/PathPlanningPage'
-import GPSMapCreate from './pages/GPSMapCreate'
 import Settings from './pages/Settings'
 import './index.css'
 
@@ -26,7 +25,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/maps" element={<AuthGuard><MapManagementPage /></AuthGuard>} />
             <Route path="/nav" element={<AuthGuard><NavPage /></AuthGuard>} />
             <Route path="/path-planning" element={<AuthGuard><PathPlanningPage /></AuthGuard>} />
-            <Route path="/gps-map-create" element={<AuthGuard><GPSMapCreate /></AuthGuard>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </HashRouter>

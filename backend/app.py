@@ -19,8 +19,6 @@ from routes.auth import auth_bp
 from routes.mapping import mapping_bp
 from routes.maps import maps_bp
 from routes.path import path_bp
-
-from routes.gps_map import gps_map_bp
 from routes.alignment import alignment_bp
 from routes.lidar_localization import lidar_localization_bp
 from routes.navigation import navigation_bp
@@ -52,7 +50,6 @@ def create_app():
     
     # 注册 Blueprint
     app.register_blueprint(auth_bp)
-    app.register_blueprint(gps_map_bp)
     app.register_blueprint(mapping_bp)
     app.register_blueprint(maps_bp)
     app.register_blueprint(path_bp)
