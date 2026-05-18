@@ -1,73 +1,82 @@
 # um982_rtk
 
-`um982_rtk` is the new RTK-first stack for the current vehicle.
+`um982_rtk` 是当前车辆的 RTK 定位和 RTK 导航 ROS 包。
 
-Initial scope:
+## 主要节点
 
-- Read the orchard-base-station RTK stream through the UM982 serial link.
-- Publish fixed-solution position and dual-antenna heading as ROS topics.
-- Provide `/odometry/rtk` as the navigation pose source.
-- Keep compatibility aliases for existing frontend/ROS consumers.
+- `scripts/um982_rtk_node.py`：读取 UM982 串口数据，发布 RTK 定位、航向、状态和里程计。
+- `scripts/um982_rtk_nav_node.py`：订阅任务与 RTK 里程计，输出 `/cmd_vel` 并发布导航状态。
 
-Current first node:
+启动文件：
 
-- `scripts/um982_rtk_node.py`
-- `scripts/um982_rtk_nav_node.py`
+```bash
+roslaunch um982_rtk um982_rtk.launch
+roslaunch um982_rtk um982_rtk.launch launch_navigation:=false
+```
 
-Primary topics:
+## 配置文件
 
-- `/rtk/fix` (`sensor_msgs/NavSatFix`)
-- `/rtk/heading` (`geometry_msgs/TwistWithCovarianceStamped`)
-- `/odometry/rtk` (`nav_msgs/Odometry`)
-- `/rtk/fix_type` (`std_msgs/String`)
-- `/rtk/position_type` (`std_msgs/String`)
-- `/rtk/satellites` (`std_msgs/UInt16`)
-- `/um982_rtk/status` (`std_msgs/String`)
+- `config/rtk.yaml`：串口、坐标模式、天线安装、兼容话题、接收机启动命令。
+- `config/navigation.yaml`：RTK 导航控制、跟踪、速度、容差和话题配置。
 
-Antenna installation is configured in `config/rtk.yaml` under `antenna`.
-`primary` and `secondary` are measured in `base_link` coordinates:
+当前默认串口：
 
-- `x`: forward, meters
-- `y`: left, meters
-- `z`: up, meters
+```text
+/dev/ttyrtk
+```
 
-`/rtk/fix` remains the receiver position from the RTK stream. `/odometry/rtk`
-uses the primary antenna offset and heading to publish the estimated
-`base_link` pose. `/rtk/heading` stays compass-style for the frontend:
-north is 0 degrees, east is 90 degrees, clockwise positive. The odometry
-quaternion is converted to ROS ENU yaw for path tracking.
+## RTK 输出话题
 
-The odometry coordinate mode is configured by `position.coordinate_mode`:
+| 话题 | 类型 | 说明 |
+| --- | --- | --- |
+| `/rtk/fix` | `sensor_msgs/NavSatFix` | RTK 经纬度定位 |
+| `/rtk/heading` | `geometry_msgs/TwistWithCovarianceStamped` | 双天线航向，前端使用罗盘角 |
+| `/odometry/rtk` | `nav_msgs/Odometry` | 导航使用的 RTK 里程计 |
+| `/rtk/fix_type` | `std_msgs/String` | 解类型文本 |
+| `/rtk/position_type` | `std_msgs/String` | 接收机位置类型 |
+| `/rtk/fix_quality` | `std_msgs/UInt8` | 固定解质量，导航可要求值为 4 |
+| `/rtk/satellites` | `std_msgs/UInt16` | 卫星数量 |
+| `/um982_rtk/status` | `std_msgs/String` | 节点状态 |
 
-- `absolute_utm`: `/odometry/rtk.pose.position.x/y` are UTM easting/northing.
-  This matches GPS paths saved by the current frontend/backend and is the
-  default for RTK navigation.
-- `local_origin`: `/odometry/rtk.pose.position.x/y` are relative to the
-  configured origin or the first fixed RTK solution.
-
-Compatibility aliases are enabled by default:
+默认开启兼容别名：
 
 - `/gps/fix`
 - `/gps/heading`
 - `/gps/satellites`
 - `/odometry/gps`
 
-Navigation node:
+## 坐标模式
 
-- Subscribes `/task` (`rtk_interfaces/Task`)
-- Subscribes `/odometry/rtk` (`nav_msgs/Odometry`)
-- Subscribes `/rtk/fix_quality` (`std_msgs/UInt8`)
-- Publishes `/cmd_vel` (`geometry_msgs/Twist`)
-- Publishes `/navigation/state` (`rtk_interfaces/TaskStatus`)
-- Publishes `/um982_rtk/active_path` (`nav_msgs/Path`)
-- Publishes `/um982_rtk/navigation_status` (`std_msgs/String`)
+`position.coordinate_mode` 支持：
 
-`um982_rtk.launch` starts both RTK positioning and navigation by default.
-Disable navigation with `launch_navigation:=false` when only validating RTK
-topics.
+- `absolute_utm`：`/odometry/rtk.pose.position.x/y` 为 UTM easting/northing。当前前后端保存的 GPS 路径按该模式工作。
+- `local_origin`：以配置原点或首个固定解为局部原点，适合隔离测试。
 
-Top-level `nav/launch/bringup.launch` also starts the Ranger chassis driver by
-default, with `chassis_model:=ranger_mini_v2`. It subscribes `/cmd_vel` and
-publishes `/odom`; RTK navigation still uses `/odometry/rtk` as its pose source.
-Set `launch_chassis:=false` to test RTK without the base driver, or override
-`chassis_model` if a different Ranger variant is used.
+## 双天线安装
+
+`config/rtk.yaml` 的 `antenna.primary` 和 `antenna.secondary` 使用 `base_link` 坐标：
+
+- `x`：前方，单位米
+- `y`：左方，单位米
+- `z`：上方，单位米
+
+`/rtk/fix` 仍是接收机给出的定位点；`/odometry/rtk` 会根据主天线偏移和航向估计 `base_link` 位姿。`heading_offset_deg` 需要按实车安装复核。
+
+## 导航节点
+
+订阅：
+
+- `/task` (`rtk_interfaces/Task`)
+- `/odometry/rtk` (`nav_msgs/Odometry`)
+- `/rtk/fix_quality` (`std_msgs/UInt8`)
+
+发布：
+
+- `/cmd_vel` (`geometry_msgs/Twist`)
+- `/navigation/state` (`rtk_interfaces/TaskStatus`)
+- `/um982_rtk/active_path` (`nav_msgs/Path`)
+- `/um982_rtk/navigation_status` (`std_msgs/String`)
+
+导航默认要求 RTK fixed，参数在 `config/navigation.yaml` 的 `control.require_rtk_fixed` 和 `control.fixed_quality_value` 中配置。
+
+最后整理：2026-05-18
