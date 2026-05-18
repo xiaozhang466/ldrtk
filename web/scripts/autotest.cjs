@@ -119,7 +119,7 @@ async function testOtherPages() {
     { path: '/#/', name: '首页' },
     { path: '/#/settings', name: '设置' },
     { path: '/#/nav', name: '导航' },
-    { path: '/#/mapping-control', name: '建图控制' },
+    { path: '/#/maps', name: '地图管理' },
   ];
   
   for (const p of pages) {
@@ -147,7 +147,7 @@ async function checkErrors() {
     '/#/maps',
     '/#/settings',
     '/#/nav',
-    '/#/mapping-control',
+    '/#/maps',
   ];
   
   const errors = [];

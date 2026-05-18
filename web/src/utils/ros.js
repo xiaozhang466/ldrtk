@@ -258,37 +258,6 @@ if (typeof window !== 'undefined') {
 export default defaultRosInstance;
 
 /**
- * 兼容旧 API 的 mapsApi
- */
-export const mapsApi = {
-  getMaps: async () => {
-    const response = await fetch('/api/maps', { credentials: 'include' });
-    if (!response.ok) throw new Error('Failed to get maps');
-    return response.json();
-  },
-  
-  saveMap: async (mapData) => {
-    const response = await fetch('/api/maps', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(mapData),
-    });
-    if (!response.ok) throw new Error('Failed to save map');
-    return response.json();
-  },
-  
-  deleteMap: async (mapId) => {
-    const response = await fetch(`/api/maps/${encodeURIComponent(mapId)}`, {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error('Failed to delete map');
-    return response.json();
-  },
-};
-
-/**
  * ROS 参数操作类
  */
 export class RosParam {
