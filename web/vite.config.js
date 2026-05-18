@@ -42,11 +42,11 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/tianditu/, '/api/tianditu')
       },
       '/api': {
-        target: 'http://192.168.3.121:5000',
+        target: 'http://localhost:5000',
         changeOrigin: true
       },
       '/ws': {
-        target: 'ws://192.168.3.121:9000',
+        target: 'ws://localhost:9090',
         ws: true,
         rewriteWsPath: (path) => path.replace('/ws', '')
       }
