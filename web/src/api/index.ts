@@ -86,6 +86,7 @@ export interface MapsResponse {
   success: boolean
   maps: MapInfo[]
   total: number
+  current_map?: string | null
 }
 
 export interface RtkOriginResponse {
@@ -116,7 +117,13 @@ export const mapsApi = {
   // 重命名地图
   renameMap: (oldName: string, newName: string) => request(`/maps/${encodeURIComponent(oldName)}`, {
     method: 'PUT',
-    body: JSON.stringify({ name: newName }),
+    body: JSON.stringify({ new_name: newName }),
+  }),
+
+  // 更新 GPS 原点
+  updateGpsOrigin: (name: string, origin: { lat: number; lng: number; alt?: number }) => request(`/maps/${encodeURIComponent(name)}/gps-origin`, {
+    method: 'PUT',
+    body: JSON.stringify(origin),
   }),
   
   // 删除地图

@@ -8,7 +8,9 @@
  * @returns {Promise<Object>} 地图列表
  */
 export async function getMaps() {
-  const response = await fetch('/api/maps');
+  const response = await fetch('/api/maps', {
+    credentials: 'include',
+  });
   
   if (!response.ok) {
     throw new Error('Failed to get maps');
@@ -34,6 +36,7 @@ export async function createMap(mapData) {
     headers: {
       'Content-Type': 'application/json',
     },
+    credentials: 'include',
     body: JSON.stringify(mapData),
   });
   
@@ -56,19 +59,7 @@ export async function createMap(mapData) {
  * @returns {Promise<Object>} 保存结果
  */
 export async function createGpsMap(mapData) {
-  const response = await fetch('/api/maps/gps', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(mapData),
-  });
-  
-  if (!response.ok) {
-    throw new Error('Failed to create GPS map');
-  }
-  
-  return response.json();
+  return createMap(mapData);
 }
 
 /**
@@ -84,19 +75,7 @@ export async function createGpsMap(mapData) {
  * @returns {Promise<Object>} 保存结果
  */
 export async function createFusionMap(mapData) {
-  const response = await fetch('/api/maps/fusion', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(mapData),
-  });
-  
-  if (!response.ok) {
-    throw new Error('Failed to create fusion map');
-  }
-  
-  return response.json();
+  return createMap(mapData);
 }
 
 
@@ -107,8 +86,9 @@ export async function createFusionMap(mapData) {
  * @returns {Promise<Object>} 删除结果
  */
 export async function deleteMap(mapName) {
-  const response = await fetch(`/api/maps?name=${mapName}`, {
+  const response = await fetch(`/api/maps/${encodeURIComponent(mapName)}`, {
     method: 'DELETE',
+    credentials: 'include',
   });
   
   if (!response.ok) {

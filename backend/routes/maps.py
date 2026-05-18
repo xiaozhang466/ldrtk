@@ -5,6 +5,7 @@ from config.config import Config
 import os
 import json
 import shutil
+import math
 from pathlib import Path
 from datetime import datetime
 
@@ -51,6 +52,26 @@ def load_map_config(map_name: str) -> dict:
         return None
     with open(config_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+def has_pcd_files(map_path: Path) -> bool:
+    """检查地图目录下是否已有点云文件。"""
+    return any(file.is_file() and file.suffix == '.pcd' for file in map_path.rglob('*'))
+
+
+def parse_finite_float(data: dict, keys: list, field_name: str, default=None):
+    for key in keys:
+        if key in data and data.get(key) not in (None, ''):
+            try:
+                value = float(data.get(key))
+            except (TypeError, ValueError):
+                raise ValueError(f'{field_name} 必须是数字')
+            if not math.isfinite(value):
+                raise ValueError(f'{field_name} 必须是有效数字')
+            return value
+    if default is not None:
+        return default
+    raise ValueError(f'{field_name} 不能为空')
 
 
 def load_alignment_summary(map_name: str) -> dict:
@@ -100,7 +121,8 @@ def get_maps():
             return jsonify({
                 'success': True,
                 'maps': [],
-                'total': 0
+                'total': 0,
+                'current_map': None
             })
 
         # 获取当前地图
@@ -195,7 +217,8 @@ def get_maps():
         return jsonify({
             'success': True,
             'maps': maps,
-            'total': len(maps)
+            'total': len(maps),
+            'current_map': current_map
         })
 
     except Exception as e:
@@ -369,10 +392,20 @@ def rename_map(map_name: str):
         
         # 重命名目录
         shutil.move(str(old_path), str(new_path))
+
+        index_file = MAP_BASE_PATH / '.index.json'
+        if index_file.exists():
+            with open(index_file, 'r', encoding='utf-8') as f:
+                index = json.load(f)
+            if index.get('current_map') == map_name:
+                index['current_map'] = new_name
+                with open(index_file, 'w', encoding='utf-8') as f:
+                    json.dump(index, f, indent=2, ensure_ascii=False)
         
         return jsonify({
             'success': True,
-            'message': f'地图已重命名为 "{new_name}"'
+            'message': f'地图已重命名为 "{new_name}"',
+            'name': new_name
         })
         
     except Exception as e:
@@ -380,6 +413,86 @@ def rename_map(map_name: str):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@maps_bp.route('/<map_name>/gps-origin', methods=['PUT'])
+@jwt_required()
+def update_gps_origin(map_name: str):
+    """更新地图 GPS 原点配置。"""
+    try:
+        map_path = MAP_BASE_PATH / map_name
+        if not map_path.exists() or not map_path.is_dir():
+            return jsonify({
+                'success': False,
+                'error': f'地图 "{map_name}" 不存在'
+            }), 404
+
+        current_state = state_manager.get_state()
+        if current_state['status'] == MappingStatus.RUNNING.value and current_state['map_name'] == map_name:
+            return jsonify({
+                'success': False,
+                'error': '建图过程中不能修改地图坐标'
+            }), 409
+
+        data = request.get_json(silent=True) or {}
+        lat = parse_finite_float(data, ['lat', 'latitude'], '纬度')
+        lng = parse_finite_float(data, ['lng', 'lon', 'longitude'], '经度')
+        alt = parse_finite_float(data, ['alt', 'altitude'], '海拔', 0.0)
+
+        if lat < -90.0 or lat > 90.0:
+            return jsonify({'success': False, 'error': '纬度范围必须在 -90 到 90 之间'}), 400
+        if lng < -180.0 or lng > 180.0:
+            return jsonify({'success': False, 'error': '经度范围必须在 -180 到 180 之间'}), 400
+        if lat == 0.0 and lng == 0.0:
+            return jsonify({'success': False, 'error': 'GPS 原点不能为 0,0'}), 400
+
+        config_file = map_path / 'map_config.json'
+        if config_file.exists():
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f) or {}
+        else:
+            config = {}
+
+        gps_origin = {
+            'lat': lat,
+            'lng': lng,
+            'alt': alt,
+        }
+        config.update({
+            'map_type': 'fusion' if has_pcd_files(map_path) else 'gps',
+            'name': config.get('name') or map_name,
+            'version': config.get('version') or '1.0',
+            'gpsOrigin': gps_origin,
+        })
+
+        if isinstance(config.get('gps_fusion'), dict):
+            config['gps_fusion']['enabled'] = True
+            config['gps_fusion']['origin'] = gps_origin
+
+        temp_file = config_file.with_suffix('.json.tmp')
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        os.replace(temp_file, config_file)
+
+        return jsonify({
+            'success': True,
+            'message': 'GPS 原点已更新',
+            'map_name': map_name,
+            'map_type': config['map_type'],
+            'gps_origin': gps_origin,
+        })
+
+    except ValueError as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 400
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 
 @maps_bp.route('/<map_name>', methods=['DELETE'])
 @jwt_required()

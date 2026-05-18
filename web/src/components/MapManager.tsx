@@ -16,7 +16,6 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { mapsApi, type MapInfo } from '../api'
-import { API_BASE } from '../config'
 import MapOperationModal from './MapOperationModal'
 
 interface MapManagerProps {
@@ -167,10 +166,14 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
   const handleRename = async (values: any) => {
     try {
       if (!renameMapInfo) return
+      const trimmedNewName = typeof values.newName === 'string' ? values.newName.trim() : ''
+      const nextMapName = trimmedNewName && trimmedNewName !== renameMapInfo.name
+        ? trimmedNewName
+        : renameMapInfo.name
       
       // 重命名
-      if (values.newName && values.newName !== renameMapInfo.name) {
-        await mapsApi.renameMap(renameMapInfo.name, values.newName)
+      if (trimmedNewName && trimmedNewName !== renameMapInfo.name) {
+        await mapsApi.renameMap(renameMapInfo.name, trimmedNewName)
       }
       
       // 更新坐标（如果有修改）
@@ -180,19 +183,8 @@ const MapManager: React.FC<MapManagerProps> = ({ onMapSelect, onNavigate }) => {
         const alt = parseFloat(values.alt) || 0
         
         if (!isNaN(lat) && !isNaN(lng)) {
-          // 调用后端 API 更新 GPS 配置
-          try {
-            const response = await fetch(`${API_BASE}/maps/${renameMapInfo.name}/gps-origin`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ lat, lng, alt }),
-            })
-            if (response.ok) {
-              message.success('坐标已更新')
-            }
-          } catch (e) {
-            console.warn('更新坐标失败:', e)
-          }
+          await mapsApi.updateGpsOrigin(nextMapName, { lat, lng, alt })
+          message.success('坐标已更新')
         }
       }
       

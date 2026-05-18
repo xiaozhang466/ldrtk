@@ -262,15 +262,16 @@ export default defaultRosInstance;
  */
 export const mapsApi = {
   getMaps: async () => {
-    const response = await fetch('/api/maps');
+    const response = await fetch('/api/maps', { credentials: 'include' });
     if (!response.ok) throw new Error('Failed to get maps');
     return response.json();
   },
   
   saveMap: async (mapData) => {
-    const response = await fetch('/api/maps/gps', {
+    const response = await fetch('/api/maps', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(mapData),
     });
     if (!response.ok) throw new Error('Failed to save map');
@@ -278,7 +279,10 @@ export const mapsApi = {
   },
   
   deleteMap: async (mapId) => {
-    const response = await fetch(`/api/maps/${mapId}`, { method: 'DELETE' });
+    const response = await fetch(`/api/maps/${encodeURIComponent(mapId)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
     if (!response.ok) throw new Error('Failed to delete map');
     return response.json();
   },
