@@ -3,6 +3,7 @@
   <arg name="map_name" default="" />
   <arg name="map_base_path" default="" />
   <arg name="alignment_file" default="" />
+  <arg name="publish_static_tf" default="true" />
 
   <node pkg="nav_fusion"
         type="publish_frame_alignment.py"
@@ -12,5 +13,6 @@
     <param name="map_name" value="$(arg map_name)" />
     <param name="map_base_path" value="$(arg map_base_path)" />
     <param name="alignment_file" value="$(arg alignment_file)" />
+    <param name="publish_static_tf" type="bool" value="$(arg publish_static_tf)" />
   </node>
 </launch>

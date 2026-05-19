@@ -27,6 +27,7 @@ from std_msgs.msg import String, UInt8
 
 NAV_NODE_TYPES = {"forwardgoal", "backgoal", "waypoint", "work_point"}
 CONTROL_TASK_TYPES = {"pause", "resume", "stop", "abort"}
+LOCALIZATION_ALLOWED_MODES = {"outdoor", "transition", "indoor"}
 
 
 @dataclass
@@ -58,6 +59,22 @@ def nested_get(data: dict[str, Any], path: str, default: Any) -> Any:
             return default
         current = current[key]
     return current
+
+
+def as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -100,10 +117,27 @@ class UM982RtkNavNode:
         self.state_topic = rospy.get_param("~state_topic", nested_get(cfg, "topics.state", "/navigation/state"))
         self.active_path_topic = rospy.get_param("~active_path_topic", nested_get(cfg, "topics.active_path", "/um982_rtk/active_path"))
         self.status_topic = rospy.get_param("~status_topic", nested_get(cfg, "topics.status", "/um982_rtk/navigation_status"))
+        self.localization_mode_topic = rospy.get_param(
+            "~localization_mode_topic",
+            nested_get(cfg, "topics.localization_mode", ""),
+        )
 
         self.frequency = float(nested_get(cfg, "control.frequency", 20.0))
         self.odom_timeout = float(nested_get(cfg, "control.odom_timeout", 1.0))
-        self.require_rtk_fixed = bool(nested_get(cfg, "control.require_rtk_fixed", True))
+        self.require_rtk_fixed = as_bool(
+            rospy.get_param("~require_rtk_fixed", nested_get(cfg, "control.require_rtk_fixed", True)),
+            True,
+        )
+        self.require_localization_ok = as_bool(
+            rospy.get_param("~require_localization_ok", nested_get(cfg, "control.require_localization_ok", False)),
+            False,
+        )
+        self.localization_grace_period_sec = float(
+            rospy.get_param(
+                "~localization_grace_period_sec",
+                nested_get(cfg, "control.localization_grace_period_sec", 10.0),
+            )
+        )
         self.fixed_quality_value = int(nested_get(cfg, "control.fixed_quality_value", 4))
 
         self.lookahead_distance = float(nested_get(cfg, "tracking.lookahead_distance", 0.8))
@@ -116,18 +150,19 @@ class UM982RtkNavNode:
         self.rotate_in_place_threshold = float(nested_get(cfg, "tracking.rotate_in_place_threshold", 0.85))
         self.yaw_align_speed = float(nested_get(cfg, "tracking.yaw_align_speed", 0.25))
         self.turn_slowdown_angular = float(nested_get(cfg, "tracking.turn_slowdown_angular", 0.25))
-        self.allow_reverse = bool(nested_get(cfg, "tracking.allow_reverse", False))
+        self.allow_reverse = as_bool(nested_get(cfg, "tracking.allow_reverse", False), False)
 
-        self.smoothing_enabled = bool(nested_get(cfg, "smoothing.enabled", True))
+        self.smoothing_enabled = as_bool(nested_get(cfg, "smoothing.enabled", True), True)
         self.linear_acceleration = float(nested_get(cfg, "smoothing.linear_acceleration", 0.12))
         self.angular_acceleration = float(nested_get(cfg, "smoothing.angular_acceleration", 0.25))
 
-        self.enforce_goal_yaw = bool(nested_get(cfg, "goal.enforce_goal_yaw", False))
+        self.enforce_goal_yaw = as_bool(nested_get(cfg, "goal.enforce_goal_yaw", False), False)
         self.default_yaw_tolerance = float(nested_get(cfg, "goal.default_yaw_tolerance", 0.15))
 
         self.current_odom: Odometry | None = None
         self.last_odom_time = 0.0
         self.last_fix_quality: int | None = None
+        self.last_localization_mode = "unknown"
         self.path: list[Waypoint] = []
         self.current_idx = 0
         self.last_total_waypoints = 0
@@ -136,6 +171,7 @@ class UM982RtkNavNode:
         self.detail = "waiting_for_task"
         self.last_cmd = Twist()
         self.last_control_time = time.monotonic()
+        self.node_started_at = time.monotonic()
 
         self.cmd_pub = rospy.Publisher(self.cmd_vel_topic, Twist, queue_size=10)
         self.state_pub = rospy.Publisher(self.state_topic, TaskStatus, queue_size=10, latch=True)
@@ -145,16 +181,27 @@ class UM982RtkNavNode:
         self.odom_sub = rospy.Subscriber(self.odom_topic, Odometry, self.odom_callback, queue_size=10)
         self.task_sub = rospy.Subscriber(self.task_topic, Task, self.task_callback, queue_size=5)
         self.fix_sub = rospy.Subscriber(self.fix_quality_topic, UInt8, self.fix_quality_callback, queue_size=10)
+        self.localization_mode_sub = None
+        if str(self.localization_mode_topic).strip():
+            self.localization_mode_sub = rospy.Subscriber(
+                self.localization_mode_topic,
+                String,
+                self.localization_mode_callback,
+                queue_size=5,
+            )
 
         self.control_timer = rospy.Timer(rospy.Duration(1.0 / self.frequency), self.control_loop)
         self.status_timer = rospy.Timer(rospy.Duration(0.5), lambda _event: self.publish_state())
 
         rospy.loginfo(
-            "um982_rtk_nav configured: odom=%s task=%s cmd_vel=%s fixed_required=%s max_v=%.2f max_w=%.2f",
+            "um982_rtk_nav configured: odom=%s task=%s cmd_vel=%s fixed_required=%s "
+            "localization_required=%s localization_mode=%s max_v=%.2f max_w=%.2f",
             self.odom_topic,
             self.task_topic,
             self.cmd_vel_topic,
             self.require_rtk_fixed,
+            self.require_localization_ok,
+            self.localization_mode_topic or "<disabled>",
             self.max_linear_speed,
             self.max_angular_speed,
         )
@@ -166,6 +213,10 @@ class UM982RtkNavNode:
 
     def fix_quality_callback(self, msg: UInt8) -> None:
         self.last_fix_quality = int(msg.data)
+
+    def localization_mode_callback(self, msg: String) -> None:
+        mode = str(msg.data).strip().lower()
+        self.last_localization_mode = mode or "unknown"
 
     def task_callback(self, msg: Task) -> None:
         task_type = msg.type.strip().lower()
@@ -200,7 +251,13 @@ class UM982RtkNavNode:
                 self.detail = "paused"
             self.stop_motion()
         elif task_type == "resume":
-            if self.path and self.state in ("paused", "stopped", "waiting_for_odom", "waiting_for_fixed"):
+            if self.path and self.state in (
+                "paused",
+                "stopped",
+                "waiting_for_odom",
+                "waiting_for_fixed",
+                "waiting_for_localization",
+            ):
                 self.state = "running"
                 self.detail = "resumed"
         elif task_type == "stop":
@@ -261,6 +318,25 @@ class UM982RtkNavNode:
         if not self.require_rtk_fixed:
             return True
         return self.last_fix_quality == self.fixed_quality_value
+
+    def localization_block_reason(self) -> str:
+        if not self.require_localization_ok:
+            return ""
+        if self.last_localization_mode in LOCALIZATION_ALLOWED_MODES:
+            return ""
+        if self.last_localization_mode == "degraded":
+            return "localization_degraded"
+        if (
+            self.last_localization_mode == "unknown"
+            and time.monotonic() - self.node_started_at < self.localization_grace_period_sec
+        ):
+            return ""
+        return "localization_unknown"
+
+    def detail_with_localization(self) -> str:
+        if not self.localization_mode_topic:
+            return self.detail
+        return f"{self.detail} localization_mode={self.last_localization_mode}"
 
     def advance_waypoints(self, position: Point, yaw: float) -> None:
         while self.current_idx < len(self.path):
@@ -354,7 +430,7 @@ class UM982RtkNavNode:
         return cmd
 
     def control_loop(self, _event: rospy.timer.TimerEvent) -> None:
-        if self.state not in ("running", "waiting_for_odom", "waiting_for_fixed"):
+        if self.state not in ("running", "waiting_for_odom", "waiting_for_fixed", "waiting_for_localization"):
             if self.state in ("paused", "stopped", "aborted", "completed"):
                 self.stop_motion()
             return
@@ -368,6 +444,13 @@ class UM982RtkNavNode:
         if not self.rtk_is_fixed():
             self.state = "waiting_for_fixed"
             self.detail = f"waiting_for_rtk_fixed quality={self.last_fix_quality}"
+            self.stop_motion()
+            return
+
+        localization_block_reason = self.localization_block_reason()
+        if localization_block_reason:
+            self.state = "waiting_for_localization"
+            self.detail = localization_block_reason
             self.stop_motion()
             return
 
@@ -421,14 +504,15 @@ class UM982RtkNavNode:
         max_idx = max(0, total_waypoints - 1)
         msg.current_waypoint_idx = min(self.current_idx, max_idx)
         msg.total_waypoints = total_waypoints
-        msg.detail = self.detail
+        detail = self.detail_with_localization()
+        msg.detail = detail
         self.state_pub.publish(msg)
 
         self.status_pub.publish(
             String(
                 data=(
                     f"state={self.state} taskid={self.taskid} progress={msg.progress:.1f} "
-                    f"idx={msg.current_waypoint_idx}/{msg.total_waypoints} detail={self.detail}"
+                    f"idx={msg.current_waypoint_idx}/{msg.total_waypoints} detail={detail}"
                 )
             )
         )

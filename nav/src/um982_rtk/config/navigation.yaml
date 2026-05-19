@@ -8,11 +8,14 @@ topics:
   state: "/navigation/state"
   active_path: "/um982_rtk/active_path"
   status: "/um982_rtk/navigation_status"
+  localization_mode: ""
 
 control:
   frequency: 20.0
   odom_timeout: 1.0
   require_rtk_fixed: true
+  require_localization_ok: false
+  localization_grace_period_sec: 10.0
   fixed_quality_value: 4
 
 tracking:

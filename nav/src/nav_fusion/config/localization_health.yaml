@@ -1,0 +1,49 @@
+# RTK/LiDAR health gates and covariance weights for fused localization.
+
+rate_hz: 20.0
+
+topics:
+  rtk_odom: "/odometry/rtk"
+  lidar_odom: "/odometry/lidar_in_rtk"
+  fix_quality: "/rtk/fix_quality"
+  satellites: "/rtk/satellites"
+  heading: "/rtk/heading"
+  rtk_weighted: "/odometry/rtk_weighted"
+  lidar_weighted: "/odometry/lidar_weighted"
+  mode: "/localization/mode"
+
+timeouts:
+  rtk_fresh_sec: 0.5
+  rtk_lost_sec: 1.0
+  lidar_fresh_sec: 0.5
+  heading_fresh_sec: 0.5
+
+rtk:
+  fixed_quality_value: 4
+  bad_quality_max: 1
+  min_satellites: 10
+  max_valid_yaw_variance: 1.0
+
+consistency:
+  xy_m: 0.5
+  yaw_deg: 10.0
+  hold_sec: 3.0
+  warn_xy_m: 2.0
+
+covariance:
+  default_z: 1.0
+  default_roll_pitch_deg: 30.0
+  invalid_yaw_deg: 180.0
+  outdoor:
+    rtk_xy: 0.03
+    rtk_yaw_deg: 1.0
+    lidar_xy: 0.5
+    lidar_yaw_deg: 3.0
+  transition:
+    rtk_xy: 0.8
+    rtk_yaw_deg: 5.0
+    lidar_xy: 0.2
+    lidar_yaw_deg: 2.0
+  indoor:
+    lidar_xy: 0.1
+    lidar_yaw_deg: 2.0

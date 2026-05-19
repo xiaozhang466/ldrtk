@@ -5,10 +5,14 @@
   <arg name="rtk_config" default="$(find um982_rtk)/config/rtk.yaml" />
   <arg name="nav_config" default="$(find um982_rtk)/config/navigation.yaml" />
   <arg name="map_name" default="" />
+  <arg name="use_localization_fusion" default="false" />
   <arg name="launch_navigation" default="true" />
   <arg name="launch_chassis" default="true" />
   <arg name="launch_lidar_loc" default="false" />
   <arg name="launch_frame_aligner" default="false" />
+  <arg name="fusion_launch_lidar_driver" default="true" />
+  <arg name="fusion_launch_imu" default="true" />
+  <arg name="fusion_launch_lidar_localization" default="true" />
   <arg name="lidar_publish_tf" default="true" />
   <arg name="map_base_path" default="$(find fast_localization)/../../../data/maps" />
   <arg name="lidar_map_path" default="$(arg map_base_path)/$(arg map_name)/lidar" />
@@ -20,10 +24,20 @@
   <arg name="chassis_odom_topic" default="odom" />
   <arg name="chassis_publish_odom_tf" default="false" />
 
-  <include file="$(find um982_rtk)/launch/um982_rtk.launch">
+  <include if="$(eval not arg('use_localization_fusion'))" file="$(find um982_rtk)/launch/um982_rtk.launch">
     <arg name="config" value="$(arg rtk_config)" />
     <arg name="nav_config" value="$(arg nav_config)" />
     <arg name="launch_navigation" value="$(arg launch_navigation)" />
+  </include>
+
+  <include if="$(eval arg('use_localization_fusion'))" file="$(find um982_rtk)/launch/um982_rtk.launch">
+    <arg name="config" value="$(arg rtk_config)" />
+    <arg name="nav_config" value="$(arg nav_config)" />
+    <arg name="launch_navigation" value="$(arg launch_navigation)" />
+    <arg name="nav_odom_topic" value="/odometry/filtered" />
+    <arg name="nav_require_rtk_fixed" value="false" />
+    <arg name="nav_require_localization_ok" value="true" />
+    <arg name="nav_localization_mode_topic" value="/localization/mode" />
   </include>
 
   <include if="$(arg launch_chassis)" file="$(find ranger_base)/launch/include/ranger_robot_base.launch">
@@ -32,19 +46,29 @@
     <arg name="odom_frame" value="$(arg chassis_odom_frame)" />
     <arg name="base_frame" value="$(arg chassis_base_frame)" />
     <arg name="odom_topic_name" value="$(arg chassis_odom_topic)" />
-    <arg name="publish_odom_tf" value="$(arg chassis_publish_odom_tf)" />
+    <arg name="publish_odom_tf" value="$(eval 'true' if arg('chassis_publish_odom_tf') and not arg('use_localization_fusion') else 'false')" />
   </include>
 
-  <include if="$(arg launch_lidar_loc)" file="$(find fast_localization)/launch/localization_lslidar_C16.launch">
+  <include if="$(eval arg('launch_lidar_loc') and not arg('use_localization_fusion'))" file="$(find fast_localization)/launch/localization_lslidar_C16.launch">
     <arg name="rviz" value="false" />
     <arg name="publish_tf" value="$(arg lidar_publish_tf)" />
     <arg name="map_file_path" value="$(arg lidar_map_path)" />
   </include>
 
-  <include if="$(arg launch_frame_aligner)" file="$(find nav_fusion)/launch/frame_alignment.launch">
+  <include if="$(eval arg('launch_frame_aligner') and not arg('use_localization_fusion'))" file="$(find nav_fusion)/launch/frame_alignment.launch">
     <arg name="map_name" value="$(arg map_name)" />
     <arg name="map_base_path" value="$(arg map_base_path)" />
     <arg name="alignment_file" value="$(arg alignment_file)" />
+  </include>
+
+  <include if="$(eval arg('use_localization_fusion'))" file="$(find nav_fusion)/launch/fusion_localization.launch">
+    <arg name="map_name" value="$(arg map_name)" />
+    <arg name="map_base_path" value="$(arg map_base_path)" />
+    <arg name="lidar_map_path" value="$(arg lidar_map_path)" />
+    <arg name="alignment_file" value="$(arg alignment_file)" />
+    <arg name="launch_lidar_driver" value="$(arg fusion_launch_lidar_driver)" />
+    <arg name="launch_imu" value="$(arg fusion_launch_imu)" />
+    <arg name="launch_lidar_localization" value="$(arg fusion_launch_lidar_localization)" />
   </include>
 
   <include if="$(arg start_rosbridge)" file="$(dirname)/rosbridge.launch">

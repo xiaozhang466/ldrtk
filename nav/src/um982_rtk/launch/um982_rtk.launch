@@ -2,6 +2,10 @@
   <arg name="config" default="$(find um982_rtk)/config/rtk.yaml" />
   <arg name="nav_config" default="$(find um982_rtk)/config/navigation.yaml" />
   <arg name="launch_navigation" default="true" />
+  <arg name="nav_odom_topic" default="" />
+  <arg name="nav_require_rtk_fixed" default="" />
+  <arg name="nav_require_localization_ok" default="" />
+  <arg name="nav_localization_mode_topic" default="" />
 
   <node pkg="um982_rtk"
         type="um982_rtk_node.py"
@@ -20,5 +24,9 @@
         respawn="true"
         respawn_delay="1.0">
     <param name="config" value="$(arg nav_config)" />
+    <param if="$(eval arg('nav_odom_topic') != '')" name="odom_topic" value="$(arg nav_odom_topic)" />
+    <param if="$(eval arg('nav_require_rtk_fixed') != '')" name="require_rtk_fixed" type="bool" value="$(arg nav_require_rtk_fixed)" />
+    <param if="$(eval arg('nav_require_localization_ok') != '')" name="require_localization_ok" type="bool" value="$(arg nav_require_localization_ok)" />
+    <param if="$(eval arg('nav_localization_mode_topic') != '')" name="localization_mode_topic" value="$(arg nav_localization_mode_topic)" />
   </node>
 </launch>

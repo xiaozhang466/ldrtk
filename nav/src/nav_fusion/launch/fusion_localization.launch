@@ -1,0 +1,65 @@
+<launch>
+  <arg name="map_name" default="" />
+  <arg name="map_base_path" default="$(find fast_localization)/../../../data/maps" />
+  <arg name="lidar_map_path" default="$(arg map_base_path)/$(arg map_name)/lidar" />
+  <arg name="alignment_file" default="" />
+  <arg name="ekf_local_config" default="$(find nav_fusion)/config/ekf_local.yaml" />
+  <arg name="ekf_global_config" default="$(find nav_fusion)/config/ekf_global.yaml" />
+  <arg name="health_config" default="$(find nav_fusion)/config/localization_health.yaml" />
+  <arg name="launch_lidar_driver" default="true" />
+  <arg name="launch_imu" default="true" />
+  <arg name="launch_lidar_localization" default="true" />
+  <arg name="publish_alignment_tf" default="true" />
+
+  <group if="$(arg launch_lidar_driver)">
+    <include file="$(find lslidar_c16_decoder)/launch/lslidar_c16.launch">
+      <arg name="rviz" value="false" />
+    </include>
+  </group>
+
+  <group if="$(arg launch_imu)">
+    <include file="$(find imu_launch)/launch/imu_msg1.launch">
+      <arg name="enable_debug_echo" value="false" />
+    </include>
+    <node pkg="topic_tools" type="relay" name="imu_data_relay" args="/IMU_data /imu/data" />
+  </group>
+
+  <group if="$(arg launch_lidar_localization)">
+    <include file="$(find fast_localization)/launch/localization_lslidar_C16.launch">
+      <arg name="rviz" value="false" />
+      <arg name="publish_tf" value="false" />
+      <arg name="map_file_path" value="$(arg lidar_map_path)" />
+    </include>
+  </group>
+
+  <include file="$(find nav_fusion)/launch/frame_alignment.launch">
+    <arg name="map_name" value="$(arg map_name)" />
+    <arg name="map_base_path" value="$(arg map_base_path)" />
+    <arg name="alignment_file" value="$(arg alignment_file)" />
+    <arg name="publish_static_tf" value="$(arg publish_alignment_tf)" />
+  </include>
+
+  <node pkg="nav_fusion"
+        type="localization_health_monitor.py"
+        name="localization_health_monitor"
+        output="screen">
+    <rosparam command="load" file="$(arg health_config)" />
+  </node>
+
+  <node pkg="robot_localization"
+        type="ekf_localization_node"
+        name="ekf_local"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(arg ekf_local_config)" />
+    <remap from="odometry/filtered" to="/odometry/local" />
+  </node>
+
+  <node pkg="robot_localization"
+        type="ekf_localization_node"
+        name="ekf_global"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(arg ekf_global_config)" />
+  </node>
+</launch>

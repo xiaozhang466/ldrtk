@@ -18,6 +18,7 @@ catkin_install_python(PROGRAMS
   scripts/calibrate_frame_alignment.py
   scripts/publish_frame_alignment.py
   scripts/control_point_recorder.py
+  scripts/localization_health_monitor.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

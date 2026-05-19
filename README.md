@@ -54,6 +54,7 @@ rtk/
 - Python 3.8+
 - Node.js 18+（前端构建）
 - UM982 RTK 串口、LiDAR、底盘 CAN 等按现场配置
+- 融合定位需要 ROS 包：`ros-noetic-robot-localization`、`ros-noetic-topic-tools`
 
 建议始终设置项目根路径：
 

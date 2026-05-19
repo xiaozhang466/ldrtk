@@ -43,6 +43,19 @@ def string_param(primary: str, fallback: str, default: str = "") -> str:
     return str(rospy.get_param(fallback, default)).strip()
 
 
+def bool_param(name: str, default: bool) -> bool:
+    value = rospy.get_param(name, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
 def yaw_to_quaternion(yaw: float) -> Tuple[float, float, float, float]:
     half = yaw * 0.5
     return 0.0, 0.0, math.sin(half), math.cos(half)
@@ -112,6 +125,7 @@ class FrameAlignmentPublisher:
         self.output_odom_topic = rospy.get_param("~topics/lidar_in_rtk_odom", "/odometry/lidar_in_rtk")
         self.status_topic = rospy.get_param("~topics/status", "/nav_fusion/alignment_status")
         self.output_child_frame = rospy.get_param("~frames/output_child", "base_link")
+        self.publish_static_tf = bool_param("~publish_static_tf", True)
 
         self.alignment_path = configured_alignment_path(self.map_name, self.map_base_path, self.alignment_file)
         self.alignment = load_alignment(self.alignment_path)
@@ -130,11 +144,19 @@ class FrameAlignmentPublisher:
         self.odom_pub = rospy.Publisher(self.output_odom_topic, Odometry, queue_size=20)
         self.static_broadcaster = tf2_ros.StaticTransformBroadcaster()
 
-        self.publish_static_transform()
+        if self.publish_static_tf:
+            self.publish_static_transform()
         self.odom_sub = rospy.Subscriber(self.lidar_odom_topic, Odometry, self.odom_callback, queue_size=50)
         self.publish_status(
-            "loaded file=%s tf=%s->%s lidar=%s output=%s"
-            % (self.alignment_path, self.parent_frame, self.child_frame, self.lidar_odom_topic, self.output_odom_topic)
+            "loaded file=%s tf=%s->%s publish_static_tf=%s lidar=%s output=%s"
+            % (
+                self.alignment_path,
+                self.parent_frame,
+                self.child_frame,
+                self.publish_static_tf,
+                self.lidar_odom_topic,
+                self.output_odom_topic,
+            )
         )
 
     def publish_status(self, text: str) -> None:
