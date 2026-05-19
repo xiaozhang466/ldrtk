@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Col, Empty, Row, Space, Statistic, Tag, Timeline, message } from 'antd'
+import { Alert, Button, Card, Col, Empty, Row, Segmented, Space, Statistic, Tag, Timeline, message } from 'antd'
 import {
   AimOutlined,
   CheckCircleOutlined,
@@ -10,6 +10,9 @@ import {
 } from '@ant-design/icons'
 import { alignmentApi, type AlignmentStatus } from '../api'
 import { useRos } from '../hooks/useRos'
+import AlignmentGcpPanel from './AlignmentGcpPanel'
+
+type AlignmentMode = 'dynamic' | 'gcp'
 
 interface AlignmentControlProps {
   mapName: string
@@ -101,6 +104,7 @@ const AlignmentControl: React.FC<AlignmentControlProps> = ({ mapName }) => {
   const [status, setStatus] = useState<AlignmentStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
+  const [mode, setMode] = useState<AlignmentMode>('gcp')
   const [logs, setLogs] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'warning' | 'error' }>>([])
   const [verification, setVerification] = useState<VerificationSnapshot>({ rtk: null, lidar: null, now: Date.now() })
   const logKeyRef = useRef('')
@@ -195,11 +199,12 @@ const AlignmentControl: React.FC<AlignmentControlProps> = ({ mapName }) => {
   const isFresh = (sample: OdomSample | null) => !!sample && verification.now - sample.receivedAt < 3000
 
   const statusTag = useMemo(() => {
-    if (isCalibrating) return <Tag color="processing" icon={<ClockCircleOutlined />}>采集中</Tag>
+    if (isCalibrating) return <Tag color="processing" icon={<ClockCircleOutlined />}>动态采集中</Tag>
+    if (status?.gcp_running) return <Tag color="processing" icon={<ClockCircleOutlined />}>GCP 采集中</Tag>
     if (isRuntime) return <Tag color="blue" icon={<PlayCircleOutlined />}>验证运行中</Tag>
     if (status?.has_alignment) return <Tag color="green" icon={<CheckCircleOutlined />}>已对齐</Tag>
     return <Tag color="default">未对齐</Tag>
-  }, [isCalibrating, isRuntime, status?.has_alignment])
+  }, [isCalibrating, isRuntime, status?.has_alignment, status?.gcp_running])
 
   const handleStart = async () => {
     setLoading(true)
@@ -271,17 +276,27 @@ const AlignmentControl: React.FC<AlignmentControlProps> = ({ mapName }) => {
             {statusTag}
           </Space>
           <Space wrap>
+            <Segmented
+              value={mode}
+              onChange={(value) => setMode(value as AlignmentMode)}
+              options={[
+                { label: '静态控制点 (GCP)', value: 'gcp' },
+                { label: '动态采样', value: 'dynamic' },
+              ]}
+            />
             <Button icon={<ReloadOutlined />} onClick={loadStatus} loading={loading}>
               刷新
             </Button>
-            {isCalibrating ? (
-              <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading}>
-                停止并计算
-              </Button>
-            ) : (
-              <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart} loading={loading}>
-                开始采集
-              </Button>
+            {mode === 'dynamic' && (
+              isCalibrating ? (
+                <Button danger icon={<StopOutlined />} onClick={handleStop} loading={loading}>
+                  停止并计算
+                </Button>
+              ) : (
+                <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart} loading={loading} disabled={!!status?.gcp_running}>
+                  开始采集
+                </Button>
+              )
             )}
             {isRuntime ? (
               <Button danger icon={<StopOutlined />} onClick={handleStopRuntime} loading={loading}>
@@ -297,12 +312,30 @@ const AlignmentControl: React.FC<AlignmentControlProps> = ({ mapName }) => {
       </Card>
 
       {statusError && <Alert type="error" showIcon message="坐标对齐状态读取失败" description={statusError} />}
-      <Alert
-        type="info"
-        showIcon
-        message="当前流程使用 RTK UTM 作为对齐基准"
-        description="请先在已有 GPS 地图中完成建图并保存点云。采集会使用 /odometry/rtk 与 /Odometry 计算 LiDAR 到 UTM 的变换，验证时发布 /odometry/lidar_in_rtk。"
-      />
+      {mode === 'dynamic' && (
+        <Alert
+          type="info"
+          showIcon
+          message="动态采样模式：开车跑一段满足空间分布要求的轨迹后停下，节点退出时自动写 rtk_lidar.yaml"
+          description="使用 /odometry/rtk 与 /Odometry 做 SVD。需要至少 30 个样本对、轨迹覆盖 10m 以上、yaw 变化 30° 以上。"
+        />
+      )}
+      {mode === 'gcp' && (
+        <Alert
+          type="info"
+          showIcon
+          message="静态控制点模式：让小车在 ≥3 个位置静止 30 秒，每个位置采一个亚厘米锚点，再求解联合最小二乘。"
+          description="目标：位置 RMSE ≤ 3cm，航向残差 RMSE ≤ 0.5°，留一法验证。"
+        />
+      )}
+
+      {mode === 'gcp' && (
+        <AlignmentGcpPanel
+          mapName={mapName}
+          alignmentStatus={status}
+          refreshStatus={loadStatus}
+        />
+      )}
 
       <Row gutter={[12, 12]}>
         <Col xs={12} md={6}>

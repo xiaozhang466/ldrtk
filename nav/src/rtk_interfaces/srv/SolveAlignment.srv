@@ -1,0 +1,21 @@
+# Request: 用当前所有 accepted 控制点求解对齐
+# map_name - 留空则使用 launch 参数 map_name
+string map_name
+---
+# Response
+bool success
+string reason
+float64 tx
+float64 ty
+float64 yaw_rad
+float64 rmse_m
+float64 max_error_m
+float64 yaw_rmse_deg
+float64 yaw_max_deg
+float64 loo_rmse_m
+float64 loo_max_m
+float64 loo_yaw_rmse_deg
+float64 loo_yaw_max_deg
+uint32  num_points
+uint32  gauss_newton_iterations
+string  output_path

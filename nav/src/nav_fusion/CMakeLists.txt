@@ -7,15 +7,17 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
   tf2_ros
+  rtk_interfaces
 )
 
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs nav_msgs rospy std_msgs tf2_ros
+  CATKIN_DEPENDS geometry_msgs nav_msgs rospy std_msgs tf2_ros rtk_interfaces
 )
 
 catkin_install_python(PROGRAMS
   scripts/calibrate_frame_alignment.py
   scripts/publish_frame_alignment.py
+  scripts/control_point_recorder.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

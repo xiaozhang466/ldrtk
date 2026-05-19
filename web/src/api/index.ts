@@ -194,17 +194,20 @@ export interface AlignmentResult {
 }
 
 export interface AlignmentStatus {
-  status: 'idle' | 'calibrating' | 'aligned' | 'runtime'
+  status: 'idle' | 'calibrating' | 'aligned' | 'runtime' | 'gcp'
   map_name?: string
   calibration_running: boolean
   runtime_running: boolean
+  gcp_running?: boolean
   active_calibration_map?: string | null
   active_runtime_map?: string | null
+  active_gcp_map?: string | null
   has_alignment: boolean
   result?: AlignmentResult | null
   requirements?: Record<string, any> | null
   calibration_log?: string
   runtime_log?: string
+  gcp_log?: string
 }
 
 export interface AlignmentStatusResponse {
@@ -244,6 +247,16 @@ export const alignmentApi = {
   }),
 
   stopRuntime: (mapName: string) => request<AlignmentStatusResponse>('/alignment/runtime/stop', {
+    method: 'POST',
+    body: JSON.stringify({ map_name: mapName }),
+  }),
+
+  startGcp: (mapName: string) => request<AlignmentStatusResponse>('/alignment/gcp/start', {
+    method: 'POST',
+    body: JSON.stringify({ map_name: mapName }),
+  }),
+
+  stopGcp: (mapName: string) => request<AlignmentStatusResponse>('/alignment/gcp/stop', {
     method: 'POST',
     body: JSON.stringify({ map_name: mapName }),
   }),

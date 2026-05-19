@@ -1,0 +1,9 @@
+# Request: 管理控制点
+# action   - "delete" 删除单点，"clear" 清空全部
+# point_id - action=delete 时必填
+string action
+string point_id
+---
+bool success
+string reason
+uint32 remaining_count

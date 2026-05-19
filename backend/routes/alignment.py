@@ -24,10 +24,12 @@ process_lock = threading.Lock()
 processes = {
     'calibration': None,
     'runtime': None,
+    'gcp': None,
 }
 process_maps = {
     'calibration': None,
     'runtime': None,
+    'gcp': None,
 }
 
 
@@ -222,15 +224,24 @@ def _status_payload(map_name: Optional[str] = None) -> dict:
         _cleanup_finished()
         calibration_running = _is_running(processes.get('calibration'))
         runtime_running = _is_running(processes.get('runtime'))
+        gcp_running = _is_running(processes.get('gcp'))
         active_calibration_map = process_maps.get('calibration')
         active_runtime_map = process_maps.get('runtime')
+        active_gcp_map = process_maps.get('gcp')
 
-    target_map = map_name or active_calibration_map or active_runtime_map
+    target_map = (
+        map_name
+        or active_calibration_map
+        or active_gcp_map
+        or active_runtime_map
+    )
     result = _read_alignment_result(target_map) if target_map else None
     requirements = _map_requirements(target_map) if target_map else None
 
     if calibration_running:
         status = 'calibrating'
+    elif gcp_running:
+        status = 'gcp'
     elif runtime_running:
         status = 'runtime'
     elif result:
@@ -243,13 +254,16 @@ def _status_payload(map_name: Optional[str] = None) -> dict:
         'map_name': target_map,
         'calibration_running': calibration_running,
         'runtime_running': runtime_running,
+        'gcp_running': gcp_running,
         'active_calibration_map': active_calibration_map,
         'active_runtime_map': active_runtime_map,
+        'active_gcp_map': active_gcp_map,
         'has_alignment': result is not None,
         'result': result,
         'requirements': requirements,
         'calibration_log': _read_log_tail('calibration'),
         'runtime_log': _read_log_tail('runtime'),
+        'gcp_log': _read_log_tail('gcp'),
     }
 
 
@@ -391,6 +405,66 @@ def stop_alignment_runtime():
         return jsonify({
             'success': True,
             'message': '坐标对齐运行验证已停止' if stopped else '没有正在运行的坐标对齐运行验证',
+            'status': _status_payload(map_name),
+        })
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+@alignment_bp.route('/gcp/start', methods=['POST'])
+@jwt_required()
+def start_alignment_gcp():
+    try:
+        data = request.get_json() or {}
+        map_name = str(data.get('map_name', '')).strip()
+        _validate_alignment_ready(map_name)
+
+        with process_lock:
+            _cleanup_finished()
+            if _is_running(processes.get('gcp')):
+                return jsonify({
+                    'success': False,
+                    'error': f'GCP 标定已在运行：{process_maps.get("gcp")}',
+                }), 409
+            if _is_running(processes.get('calibration')):
+                return jsonify({
+                    'success': False,
+                    'error': '动态标定正在运行，请先停止后再启动 GCP 标定',
+                }), 409
+            _start_roslaunch('gcp', [
+                'roslaunch',
+                'nav_fusion',
+                'gcp_calibrate.launch',
+                f'map_name:={map_name}',
+            ], map_name)
+
+        time.sleep(0.2)
+        return jsonify({
+            'success': True,
+            'message': f'已启动 GCP 标定：{map_name}',
+            'status': _status_payload(map_name),
+        })
+    except FileNotFoundError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 404
+    except AlignmentPrerequisiteError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+@alignment_bp.route('/gcp/stop', methods=['POST'])
+@jwt_required()
+def stop_alignment_gcp():
+    try:
+        data = request.get_json(silent=True) or {}
+        map_name = str(data.get('map_name', '')).strip() or process_maps.get('gcp')
+        with process_lock:
+            stopped = _stop_process('gcp')
+        return jsonify({
+            'success': True,
+            'message': 'GCP 标定已停止' if stopped else '没有正在运行的 GCP 标定',
             'status': _status_payload(map_name),
         })
     except Exception as exc:

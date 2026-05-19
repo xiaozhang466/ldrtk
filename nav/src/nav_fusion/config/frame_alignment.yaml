@@ -25,3 +25,33 @@ calibration:
 paths:
   map_base_path: ""
   alignment_file: ""
+
+# 静态控制点（GCP）模式参数
+# 启动方式：roslaunch nav_fusion gcp_calibrate.launch map_name:=<...>
+# 不影响动态采样标定（calibrate.launch）的参数
+gcp:
+  record_duration_sec: 30.0
+  progress_rate_hz: 5.0
+  static_max_linear_velocity: 0.05
+  static_max_angular_velocity: 0.05
+  static_max_pos_std_m: 0.01
+  static_max_yaw_std_deg: 0.5
+  min_sample_count: 240
+  require_rtk_fixed: true
+  min_points_to_solve: 3
+  min_triangle_area_m2: 0.1
+  sigma_pos_floor_m: 0.005
+  sigma_yaw_floor_deg: 0.2
+  gauss_newton_max_iter: 3
+  gauss_newton_eps: 1.0e-9
+  max_solve_rmse_m: 0.03
+  max_solve_yaw_rmse_deg: 0.5
+  max_loo_rmse_m: 0.03
+  max_loo_yaw_rmse_deg: 0.8
+  persistence_file: ""
+  # 节点 ROS 名称（launch 默认 gcp_recorder），前端用以下完整名通信：
+  #   /gcp_recorder/status            (std_msgs/String, latched, JSON)
+  #   /gcp_recorder/progress          (std_msgs/String, JSON, 5Hz)
+  #   /gcp_recorder/record_control_point  (rtk_interfaces/RecordControlPoint)
+  #   /gcp_recorder/solve_alignment       (rtk_interfaces/SolveAlignment)
+  #   /gcp_recorder/manage_control_point  (rtk_interfaces/ManageControlPoint)

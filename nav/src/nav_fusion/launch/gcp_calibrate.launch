@@ -1,0 +1,16 @@
+<launch>
+  <arg name="config" default="$(find nav_fusion)/config/frame_alignment.yaml" />
+  <arg name="map_name" default="" />
+  <arg name="map_base_path" default="" />
+  <arg name="alignment_file" default="" />
+
+  <node pkg="nav_fusion"
+        type="control_point_recorder.py"
+        name="gcp_recorder"
+        output="screen">
+    <rosparam command="load" file="$(arg config)" />
+    <param name="map_name" value="$(arg map_name)" />
+    <param name="map_base_path" value="$(arg map_base_path)" />
+    <param name="alignment_file" value="$(arg alignment_file)" />
+  </node>
+</launch>

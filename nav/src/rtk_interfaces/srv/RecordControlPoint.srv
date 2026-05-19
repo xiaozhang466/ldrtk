@@ -1,0 +1,19 @@
+# Request: 录制一个静态控制点
+# name        - 控制点显示名称，留空则自动生成
+# duration_sec - 录制时长（秒），0 = 使用节点默认值
+string name
+float32 duration_sec
+---
+# Response: 控制点是否被接受
+bool accepted
+string reason
+string point_id
+float64 rtk_x
+float64 rtk_y
+float64 rtk_yaw_rad
+float64 lidar_x
+float64 lidar_y
+float64 lidar_yaw_rad
+float64 pos_std_max_m
+float64 yaw_std_max_deg
+uint32  sample_count
