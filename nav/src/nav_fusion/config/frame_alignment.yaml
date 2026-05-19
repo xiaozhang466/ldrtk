@@ -35,7 +35,7 @@ gcp:
   static_max_linear_velocity: 0.05
   static_max_angular_velocity: 0.05
   static_max_pos_std_m: 0.01
-  static_max_yaw_std_deg: 0.5
+  static_max_yaw_std_deg: 1.2
   min_sample_count: 240
   require_rtk_fixed: true
   min_points_to_solve: 3

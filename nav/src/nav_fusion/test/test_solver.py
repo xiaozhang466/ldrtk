@@ -30,6 +30,7 @@ import types
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +348,21 @@ def test_gn_step_decreases_cost():
         print(f"  d_alpha={math.degrees(d_alpha):+5.1f}deg: cost {c_before:.4e} -> {c_after:.4e}  OK")
 
 
+def test_yaml_builtin_conversion():
+    print("[test_yaml_builtin_conversion]")
+    points = np.array([[0.0, 0.0], [35.0, 0.0], [2.0, 48.80315128816243]], dtype=float)
+    area = cpr.signed_triangle_area(points)
+    payload = cpr.to_yaml_builtin({
+        "triangle_area_m2": area,
+        "numpy_scalar": np.float64(854.0551475428426),
+        "numpy_array": np.array([np.int64(1), np.float64(2.5)]),
+    })
+    yaml.safe_dump(payload, sort_keys=False)
+    if not isinstance(payload["triangle_area_m2"], float):
+        raise AssertionError("triangle area was not converted to a Python float")
+    print("  yaml safe_dump accepts numpy-derived values")
+
+
 def main():
     print("Running joint-LS solver tests...\n")
     test_perfect_data()
@@ -358,6 +374,8 @@ def main():
     test_gn_step_decreases_cost()
     print()
     test_finite_difference_gradient()
+    print()
+    test_yaml_builtin_conversion()
     print("\nAll tests passed.")
 
 

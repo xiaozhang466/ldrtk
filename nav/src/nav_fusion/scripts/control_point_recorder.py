@@ -77,6 +77,21 @@ def string_param(primary: str, fallback: str, default: str = "") -> str:
     return str(rospy.get_param(fallback, default)).strip()
 
 
+def to_yaml_builtin(value: Any) -> Any:
+    """Convert numpy/path helper values into types PyYAML safe_dump supports."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return [to_yaml_builtin(item) for item in value.tolist()]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {to_yaml_builtin(key): to_yaml_builtin(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_yaml_builtin(item) for item in value]
+    return value
+
+
 def yaw_from_quaternion(q: Any) -> Optional[float]:
     norm = math.sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w)
     if norm < 0.5:
@@ -228,7 +243,7 @@ def signed_triangle_area(points: np.ndarray) -> float:
                 area = 0.5 * abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]))
                 if area > best:
                     best = area
-    return best
+    return float(best)
 
 
 def spatial_spread(points: np.ndarray) -> float:
@@ -1164,6 +1179,7 @@ class ControlPointRecorder:
                 ],
             },
         }
+        payload = to_yaml_builtin(payload)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8") as handle:
             yaml.safe_dump(payload, handle, sort_keys=False, allow_unicode=True)

@@ -419,7 +419,7 @@ const AlignmentGcpPanel: React.FC<AlignmentGcpPanelProps> = ({
 
   const sigmaYawOK = useMemo(() => {
     if (!progress) return null
-    const limit = statusPayload?.config.max_yaw_std_deg ?? 0.5
+    const limit = statusPayload?.config.max_yaw_std_deg ?? 1.2
     return progress.rtk_yaw_std_deg <= limit
   }, [progress, statusPayload])
 
