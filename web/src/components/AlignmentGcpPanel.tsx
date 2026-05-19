@@ -86,6 +86,7 @@ interface StatusPayload {
   control_points: ControlPointEntry[]
   config: {
     record_duration_sec: number
+    max_linear_velocity_mps?: number
     max_pos_std_m: number
     max_yaw_std_deg: number
     max_solve_rmse_m: number
@@ -423,6 +424,20 @@ const AlignmentGcpPanel: React.FC<AlignmentGcpPanelProps> = ({
     return progress.rtk_yaw_std_deg <= limit
   }, [progress, statusPayload])
 
+  const lidarSigmaPosOK = useMemo(() => {
+    if (!progress) return null
+    const limit = (statusPayload?.config.max_pos_std_m ?? 0.01) * 2
+    return progress.lidar_pos_std_m <= limit
+  }, [progress, statusPayload])
+
+  const lidarSigmaYawOK = useMemo(() => {
+    if (!progress) return null
+    const limit = (statusPayload?.config.max_yaw_std_deg ?? 1.2) * 2
+    return progress.lidar_yaw_std_deg <= limit
+  }, [progress, statusPayload])
+
+  const staticSpeedLimitMps = statusPayload?.config.max_linear_velocity_mps ?? 0.05
+
   const renderPointsTable = () => {
     const columns = [
       {
@@ -657,35 +672,62 @@ const AlignmentGcpPanel: React.FC<AlignmentGcpPanelProps> = ({
                 `${p}% · 剩余 ${progress.remaining_sec.toFixed(1)}s`
               }
             />
-            <Space wrap size="large" style={{ marginTop: 12 }}>
-              <Statistic title="RTK 样本数" value={progress.rtk_sample_count} />
-              <Statistic title="LiDAR 样本数" value={progress.lidar_sample_count} />
-              <Statistic
-                title="RTK 位置 σ"
-                value={progress.rtk_pos_std_m * 1000}
-                precision={1}
-                suffix="mm"
-                valueStyle={{ color: sigmaPosOK == null ? undefined : sigmaPosOK ? '#52c41a' : '#ff4d4f' }}
-              />
-              <Statistic
-                title="RTK 航向 σ"
-                value={progress.rtk_yaw_std_deg}
-                precision={2}
-                suffix="°"
-                valueStyle={{ color: sigmaYawOK == null ? undefined : sigmaYawOK ? '#52c41a' : '#ff4d4f' }}
-              />
-              <Statistic
-                title="RTK 速度"
-                value={progress.rtk_speed_mps}
-                precision={3}
-                suffix="m/s"
-                valueStyle={{ color: progress.rtk_speed_mps <= 0.05 ? '#52c41a' : '#ff4d4f' }}
-              />
-              <div>
-                <Text type="secondary">RTK 解</Text>
-                <div>{qualityTag(progress.rtk_quality)}</div>
-              </div>
-            </Space>
+            <div style={{ marginTop: 12 }}>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>RTK</Text>
+              <Space wrap size="large">
+                <Statistic title="样本数" value={progress.rtk_sample_count} />
+                <Statistic
+                  title="位置 σ"
+                  value={progress.rtk_pos_std_m * 1000}
+                  precision={1}
+                  suffix="mm"
+                  valueStyle={{ color: sigmaPosOK == null ? undefined : sigmaPosOK ? '#52c41a' : '#ff4d4f' }}
+                />
+                <Statistic
+                  title="航向 σ"
+                  value={progress.rtk_yaw_std_deg}
+                  precision={2}
+                  suffix="°"
+                  valueStyle={{ color: sigmaYawOK == null ? undefined : sigmaYawOK ? '#52c41a' : '#ff4d4f' }}
+                />
+                <Statistic
+                  title="速度"
+                  value={progress.rtk_speed_mps}
+                  precision={3}
+                  suffix="m/s"
+                  valueStyle={{ color: progress.rtk_speed_mps <= staticSpeedLimitMps ? '#52c41a' : '#ff4d4f' }}
+                />
+                <div>
+                  <Text type="secondary">解类型</Text>
+                  <div>{qualityTag(progress.rtk_quality)}</div>
+                </div>
+              </Space>
+              <Text type="secondary" style={{ display: 'block', marginTop: 12, marginBottom: 8 }}>LiDAR</Text>
+              <Space wrap size="large">
+                <Statistic title="样本数" value={progress.lidar_sample_count} />
+                <Statistic
+                  title="位置 σ"
+                  value={progress.lidar_pos_std_m * 1000}
+                  precision={1}
+                  suffix="mm"
+                  valueStyle={{ color: lidarSigmaPosOK == null ? undefined : lidarSigmaPosOK ? '#52c41a' : '#ff4d4f' }}
+                />
+                <Statistic
+                  title="航向 σ"
+                  value={progress.lidar_yaw_std_deg}
+                  precision={2}
+                  suffix="°"
+                  valueStyle={{ color: lidarSigmaYawOK == null ? undefined : lidarSigmaYawOK ? '#52c41a' : '#ff4d4f' }}
+                />
+                <Statistic
+                  title="速度"
+                  value={progress.lidar_speed_mps}
+                  precision={3}
+                  suffix="m/s"
+                  valueStyle={{ color: progress.lidar_speed_mps <= staticSpeedLimitMps ? '#52c41a' : '#ff4d4f' }}
+                />
+              </Space>
+            </div>
           </Card>
         )}
       </Card>

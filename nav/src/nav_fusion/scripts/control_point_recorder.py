@@ -1073,6 +1073,7 @@ class ControlPointRecorder:
             "control_points": [self._point_to_dict(p) for p in self.points],
             "config": {
                 "record_duration_sec": self.default_duration,
+                "max_linear_velocity_mps": self.max_lin_vel,
                 "max_pos_std_m": self.max_pos_std,
                 "max_yaw_std_deg": self.max_yaw_std_deg,
                 "max_solve_rmse_m": self.max_solve_rmse,
